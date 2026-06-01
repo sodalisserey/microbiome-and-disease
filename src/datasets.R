@@ -1,0 +1,64 @@
+# A central registry of datasets to analyse, consisting of primary and secondary cohorts
+
+default_cfg <- list(
+  group_col       = "study_condition",
+  age_col         = "age_category",
+  body_site_col   = "body_site",
+  keep_body_sites = c("stool"),     
+  exclude         = character(0)
+)
+
+
+# Primary cohorts (Healthy + Disease for Lefser and ML)
+primary_cohort_names <- c(
+  "BedarfJR_2017",
+  "DavidLA_2015",
+  "GuptaA_2019",
+  "HMP_2019_ibdmdb",
+  "HallAB_2017",
+  "IjazUZ_2017",
+  "JieZ_2017",
+  "LiJ_2017",
+  "ZhuF_2020",
+  "YeZ_2018",
+  "VogtmannE_2016",
+  "WirbelJ_2018",
+  "ThomasAM_2018b",
+  "ThomasAM_2019_c",
+  "RubelMA_2020",
+  "SankaranarayananK_2015",
+  "RosaBA_2018",
+  "KosticAD_2015",
+  "NielsenHB_2014",
+  "NagySzakalD_2017",
+  "QinJ_2012",
+  "ChuDM_2017",
+  "FengQ_2015",
+  "HMP_2019_t2d",
+  "HanniganGD_2017",
+  "Heitz-BuschartA_2016",
+  "IaniroG_2022",
+  "KarlssonFH_2013",
+  "KieserS_2018",
+  "LiJ_2014",
+  "LiSS_2016",
+  "MetaCardis_2020_a",
+  "QinN_2014",
+  "ThomasAM_2018a",
+  "VatanenT_2016",
+  "VincentC_2016",
+  "XieH_2016",
+  "YachidaS_2019",
+  "YuJ_2015",
+  "ZellerG_2014"
+)
+
+
+primary_cohorts <- lapply(primary_cohort_names, function(ds) {
+  default_cfg <- default_cfg
+  default_cfg$dataset <- ds
+  default_cfg
+  })
+
+
+names(primary_cohorts) <- primary_cohort_names
