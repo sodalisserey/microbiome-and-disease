@@ -1,21 +1,21 @@
 # Pipeline:
 # 1. Read dataset registry from datasets.R and load cohorts via handler.R
-# 2. For each cohort, extract study conditions:
+# 2. For each cohort, extract unique study conditions (disease):
 #    * If healthy + 1 disease  -> 
-#       - Lefser analysis loop which:
-#            * Prints contingency table (age_category x study_condition)
-#            * Checks class balance (n per group, imbalance ratio) 
-#            * Runs Lefser if class balance OK/CAUTION
+#       - Perform QC:
+#           * Print contingency table (age_category x study_condition)
+#           * Check class balance (n per group, imbalance ratio) 
+#       - Run Lefser if class balance OK/CAUTION, otherwise skip
 #    * If healthy + >1 disease -> 
 #       - Create pair-wise subsets (healthy + 1 disease)
-#       - For each subset, perform Lefser analysis loop (as above)
-# 3. Collect Lefser result tables and plots
-# 4. Print class balance summary across all comparisons
-# 5. Save and display combined plot via handler.R
+#       - For each subset, perform QC: 
+#           * Print contingency table (age_category x study_condition)
+#           * Check class balance (n per group, imbalance ratio) 
+#       - Run Lefser if class balance OK/CAUTION, otherwise skip
+# 3. Save QC and analysis results as RData and csv
+# 4. Save Lefser plots for each comparison
 
-
-# Load packages and dependencies ###############################################
-library(lefser)
+# Load packages and dependencies -----------------------------------------------
 library(curatedMetagenomicData)
 library(patchwork)
 library(ggplot2)
@@ -23,12 +23,11 @@ source("datasets.R")
 source("handler.R")
 
 
-# Load analysis cohorts ########################################################
+# Load analysis cohorts --------------------------------------------------------
 primary_cohorts <- load_cohorts(primary_cohort_names)
 
 
-# Define helper functions ######################################################
-
+# Define helper functions ------------------------------------------------------
 #' Process and clean/remove NA
 clean_cohort <- function(cohort) {
   
@@ -66,6 +65,25 @@ get_disease_groups <- function(cohort,
     diseases = diseases,
     n_diseases = length(diseases)
   )
+}
+
+#'
+standardise_conditions <- function(cohort) {
+  
+  meta <- as.data.frame(colData(cohort))
+  
+  meta$study_condition <- factor(
+    meta$study_condition,
+    levels = c(
+      "control",
+      sort(setdiff(unique(as.character(meta$study_condition)),
+                   "control"))
+    )
+  )
+  
+  colData(cohort)$study_condition <- meta$study_condition
+  
+  cohort
 }
 
 
@@ -158,25 +176,6 @@ get_contingency_table <- function(cohort,
   
   return(tbl)
 }
-  
-  
-standardise_conditions <- function(cohort) {
-  
-  meta <- as.data.frame(colData(cohort))
-  
-  meta$study_condition <- as.character(meta$study_condition)
-  
-  meta$study_condition[meta$study_condition == "control"] <- "control"
-  meta$study_condition[is.na(meta$study_condition)] <- NA
-  
-  meta$study_condition <- factor(meta$study_condition,
-                                 levels = c("control",
-                                            sort(setdiff(unique(meta$study_condition), "control"))))
-  
-  colData(cohort)$study_condition <- meta$study_condition
-  
-  cohort
-}
 
 
 #' Run Lefser by setting terminal nodes (age_category disabled)
@@ -217,24 +216,17 @@ run_lefser <- function(cohort,
     " | features = ", nrow(cohort)
   )
   
-  # -----------------------------
-  # 1. Terminal node filtering
-  # -----------------------------
+  # Terminal node filtering
   tn <- get_terminal_nodes(rownames(cohort))
   cohort <- cohort[tn, , drop = FALSE]
   
-  # -----------------------------
-  # 2. Relative abundance transform
-  # -----------------------------
+  # Relative abundance transform
   cohort <- relativeAb(cohort)
   
-  # -----------------------------
-  # 4. LEfSe
-  # -----------------------------
+  # LEfSe
   set.seed(seed)
-  
+
   tryCatch({
-    
     suppressWarnings(
       lefser(
         cohort,
@@ -242,7 +234,6 @@ run_lefser <- function(cohort,
         subclassCol = subclass
       )
     )
-    
   }, error = function(e) {
     
     message("ERROR in ", cohort, " | ", comparison, ": ", e$message)
@@ -251,77 +242,88 @@ run_lefser <- function(cohort,
 }
 
 
-# Main discriminant taxa analysis loop #########################################
+# Main analysis ----------------------------------------------------------------
+# Define storage objects to collect results
 lefser_results <- list()
-lefser_plots          <- list()
 contingency_tables <- list()
-balance_log        <- list()
+class_balance_summary <- list()
+age_balance_summary   <- list()
 
-
+# Main loop
 for (cohort_name in names(primary_cohorts)) {  
   cohort <- primary_cohorts[[cohort_name]]
   cohort <- clean_cohort(cohort)
   cohort <- standardise_conditions(cohort)
   
+  ## extract study_conditions
   info <- get_disease_groups(cohort)
   
+  ## filter out cohorts with no healthy controls
   if (!info$healthy_present) {
     message("No healthy controls in ", cohort_name, ". Skipping.")
     next
   }
-
+  ## filter out cohorts with only healthy samples
   if (info$n_diseases == 0) {
-    message("Healthy samples only in ", cohort_name, ". Skipping.")
-  } 
-  else if (info$n_diseases == 1) {
-      disease <- info$diseases
-      message("\n", cohort_name, ": healthy + ", disease)
-      
-      # Create and print contingency table
-      get_contingency_table(cohort)
-
-      # Check class and age balance
-      class_balance <- check_class_balance(cohort)
-      check_age_balance(cohort)
-
-      # If class_status = OK, run Lefser
-      if (class_balance$class_status != "SKIP") {
-        res <- run_lefser(cohort,
-                        comparison = paste("control vs", disease)
-      )
+    message
+    ## for cohorts with healthy + 1 disease
+  } else if (info$n_diseases == 1) {
+    disease <- info$diseases
+    message("\n", cohort_name, ": healthy + ", disease)
+    
+    ### QC: check and save contingency table, class and age balance
+    comparison_name <- paste(cohort_name, disease, sep = "_")
+    
+    contingency_table <- get_contingency_table(cohort)
+    class_balance <- check_class_balance(cohort)
+    age_balance <- check_age_balance(cohort)
+    
+    class_balance_summary[[comparison_name]] <- class_balance
+    age_balance_summary[[comparison_name]]   <- age_balance
+    contingency_tables[[comparison_name]] <- contingency_table
+    
+    ### run Lefser if class_status is not "SKIP"
+    if (class_balance$class_status != "SKIP") {
+      res <- run_lefser(cohort, comparison = paste("control vs", disease))
       
       lefser_results[[paste(cohort_name, disease, sep = "_")]] <- res
-      } else {
-        message("Skipping Lefser due to class imbalance")
-      }
-
       
+      ### skip Lefser if class_status is "SKIP"
+    } else {
+      message("Skipping Lefser due to class imbalance")
+    }
+    
+    ## for cohorts with healthy + >1 disease
   } else {
     message(cohort_name, ": healthy + ", info$n_diseases, " diseases")
-
+    
     for (disease in info$diseases) {
       message("\n  Comparison: healthy vs ", disease)
       
-      # Create subset of cohort
+      ### create subset of cohort (healthy + 1 disease)
       meta <- as.data.frame(colData(cohort))
       keep <- meta$study_condition %in% c("control", disease)
       cohort_subset <- cohort[, keep]
       cohort_subset <- standardise_conditions(cohort_subset)
       
-      # Create and print contingency table
-      get_contingency_table(cohort_subset)
-
-      # Check class and age balance
-      class_balance <- check_class_balance(cohort_subset)
-      check_age_balance(cohort_subset)
+      ### QC: check and save contingency table, class and age balance
+      comparison_name <- paste(cohort_name, disease, sep = "_")
       
-      # If class_status = OK, run Lefser
+      contingency_table <- get_contingency_table(cohort_subset)
+      class_balance <- check_class_balance(cohort_subset)
+      age_balance <- check_age_balance(cohort_subset)
+      
+      class_balance_summary[[comparison_name]] <- class_balance
+      age_balance_summary[[comparison_name]]   <- age_balance
+      contingency_tables[[comparison_name]] <- contingency_table
+      
+      ### run Lefser if class_status is not "SKIP"
       if (class_balance$class_status != "SKIP") {
-        res <- run_lefser(cohort_subset,
-                          comparison = paste("control vs", disease)
-        )
+        res <- run_lefser(cohort_subset, comparison = paste("control vs", disease))
         
         lefser_results[[paste(cohort_name, disease, sep = "_")]] <- res
+        
+        ### skip Lefser if class_status is "SKIP"
       } else {
         message("Skipping Lefser due to class imbalance")
       }
@@ -330,10 +332,99 @@ for (cohort_name in names(primary_cohorts)) {
 } 
 
 
+# Results and visualisation ----------------------------------------------------
+out_dir <- "results/discriminant_taxa"
 
-# Results and visualisation ####################################################
-outdir <- file.path("results/discriminant_taxa")
+# Save as RData
+save(
+  lefser_results,
+  contingency_tables,
+  class_balance_summary,
+  age_balance_summary,
+  file = file.path(outdir, "analysis_results.RData")
+)
 
+# Process lefser_results, contingency_tables, class_balance_summary and age_balance_summary 
+# TODO: make these into helper functions
+lefser_df <- do.call(
+  rbind,
+  lapply(names(lefser_results), function(nm) {
+    
+    res <- lefser_results[[nm]]
+    
+    if (is.null(res) || nrow(res) == 0)
+      return(NULL)
+    
+    df <- as.data.frame(res)
+    df$comparison <- nm
+    
+    df
+  })
+)
+
+contingency_df <- do.call(
+  rbind,
+  lapply(names(contingency_tables), function(comp) {
+    
+    tab <- contingency_tables[[comp]]
+    
+    df <- as.data.frame(tab)
+    
+    df$comparison <- comp
+    
+    df
+  })
+)
+
+class_balance_df <- do.call(
+  rbind,
+  lapply(names(class_balance_summary), function(x) {
+    data.frame(
+      comparison   = x,
+      class_ratio  = class_balance_summary[[x]]$class_ratio,
+      class_status = class_balance_summary[[x]]$class_status
+    )
+  })
+)
+
+age_balance_df <- do.call(
+  rbind,
+  lapply(names(age_balance_summary), function(x) {
+    data.frame(
+      comparison = x,
+      age_ratio  = age_balance_summary[[x]]$age_ratio,
+      age_status = age_balance_summary[[x]]$age_status
+    )
+  })
+)
+
+# Save results as csv files
+write.csv(
+  lefser_df,
+  file.path(out_dir, "lefser_results_combined.csv"),
+  row.names = FALSE
+)
+
+write.csv(
+  contingency_df,
+  file.path(out_dir, "contingency_tables.csv"),
+  row.names = FALSE
+)
+
+summary_df <- merge(
+  class_balance_df,
+  age_balance_df,
+  by = "comparison"
+)
+
+write.csv(
+  summary_df,
+  file.path(out_dir, "class_age_summary.csv"),
+  row.names = FALSE
+)
+
+
+# Create Lefser plots and save
 dir.create(file.path(outdir, "plots"), recursive = TRUE, showWarnings = FALSE)
 
 for (name in names(lefser_results)) {
@@ -358,7 +449,7 @@ for (name in names(lefser_results)) {
   safe_name <- gsub("[/\\\\]", "_", name)
   
   ggsave(
-    filename = file.path(outdir, "plots", paste0(safe_name, ".png")),
+    filename = file.path(out_dir, "plots", paste0(safe_name, ".png")),
     plot = p,
     bg = "white",
     width = 12,
