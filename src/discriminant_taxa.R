@@ -1,19 +1,19 @@
 # Pipeline:
 # 1. Read dataset registry from datasets.R and load cohorts via handler.R
-# 2. For each cohort, extract unique study conditions (disease):
-#    * If healthy + 1 disease  -> 
-#       - Perform QC:
-#           * Print contingency table (age_category x study_condition)
-#           * Check class balance (n per group, imbalance ratio) 
-#       - Run Lefser and print class/age balance warning message
-#    * If healthy + >1 disease -> 
-#       - Create pair-wise subsets (healthy + 1 disease)
-#       - For each subset, perform QC: 
-#           * Print contingency table (age_category x study_condition)
-#           * Check class balance (n per group, imbalance ratio) 
-#       - Run Lefser and print class/age balance warning message
-# 3. Save QC and analysis results as RData and csv
-# 4. Save Lefser plots for each comparison
+# 2. For each cohort, clean and extract unique study conditions (disease):
+#    * ANALYSIS BRANCH 1: healthy x 1 disease  -> 
+#       - Run QC (contingency table, check class and age balance, sample size)
+#         * log QC results
+#       - Perform Lefser
+#         * log analysis status and combination
+#    * ANALYSIS BRANCH 2: healthy x >1 disease  -> 
+#       - Create pair-wise subsets (healthy vs disease) and on each subset:
+#         - Run QC (contingency table, check class and age balance, sample size)
+#           * log QC results
+#         - Perform Lefser
+#           * log analysis status and combination
+# 3. Bulk save pipeline results as RDS and CSV
+
 
 # Load packages and dependencies -----------------------------------------------
 library(curatedMetagenomicData)
@@ -23,18 +23,27 @@ source("src/datasets.R")
 source("src/handler.R")
 
 
-# Load analysis cohorts --------------------------------------------------------
-primary_cohorts <- load_cohorts(primary_cohort_names)
+# Load data --------------------------------------------------------------------
+# Optional: build primary_cohorts for scratch and save
+# primary_cohorts <- load_cohorts(primary_cohort_names)
+# 
+# saveRDS(primary_cohorts, "data/primary_cohorts.rds")
 
+# Load primary_cohorts after saving as rds
+primary_cohorts <- readRDS("data/primary_cohorts.rds")
 
 # Define helper functions ------------------------------------------------------
-# TODO: write all documentations for helper functions
-#' Process and clean/remove NA
+
+#' Clean cohort by removing invalid or missing study_condition values
+#'
+#' @param cohort A SummarizedExperiment / TreeSummarizedExperiment object
+#' @return A filtered cohort object with invalid samples removed
 clean_cohort <- function(cohort) {
   
   meta <- as.data.frame(colData(cohort))
   meta$study_condition <- as.character(meta$study_condition)
   
+  # Remove samples where study_condition is NA, empty or whitespace only
   keep <- !is.na(meta$study_condition) &
     meta$study_condition != "" &
     meta$study_condition != " "
@@ -44,29 +53,16 @@ clean_cohort <- function(cohort) {
   return(cohort)
 }
 
-#'
-# TODO: combine clean and standardise into one function?
-standardise_conditions <- function(cohort) {
-  
-  meta <- as.data.frame(colData(cohort))
-  
-  meta$study_condition <- factor(
-    meta$study_condition,
-    levels = c(
-      "control",
-      sort(setdiff(unique(as.character(meta$study_condition)),
-                   "control"))
-    )
-  )
-  
-  colData(cohort)$study_condition <- meta$study_condition
-  
-  cohort
-}
-
-#' Extract disease groups and check if healthy + 1 disease or >1 disease
-#' @param 
-#' @return
+#' Identify and extract healthy and disease groups from study_condition metadata
+#' @param cohort A SummarizedExperiment / TreeSummarizedExperiment object
+#' @param condition_col Column name containing sample condition labels
+#' @param healthy_label Label used for healthy/control samples
+#' @return A list with:
+#' \describe{
+#'   \item{healthy_present}{Logical, whether healthy samples exist}
+#'   \item{diseases}{Character vector of disease labels}
+#'   \item{n_diseases}{Number of disease conditions}
+#' }
 get_disease_groups <- function(cohort,
                                condition_col = "study_condition",
                                healthy_label = "control") {
@@ -78,7 +74,7 @@ get_disease_groups <- function(cohort,
   conditions <- conditions[!is.na(conditions)]
   conditions <- unique(conditions)
   
-  # Disease labels = everything except healthy
+  # Disease labels = every study_condition except healthy
   diseases <- setdiff(conditions, healthy_label)
   
   list(
@@ -88,40 +84,50 @@ get_disease_groups <- function(cohort,
   )
 }
 
-#' Create contingency tables
-#' @param 
-#' @return
-get_contingency_table <- function(cohort,
-                                  age_col = "age_category",
-                                  condition_col = "study_condition") 
-{
+#' Run QC checks on a cohort and compute:
+#' - contingency table (age_category × study_condition)
+#' - class imbalance 
+#' - age distribution imbalance
+#' - sample sizes per condition
+#'
+#' @param cohort A SummarizedExperiment / TreeSummarizedExperiment object
+#' @param age_col Column name for age grouping variable
+#' @param condition_col Column name for study condition
+#' @param class_imbalance_mid Threshold for moderate class imbalance
+#' @param class_imbalance_high Threshold for high class imbalance
+#' @param age_imbalance_thresh Threshold for age distribution imbalance
+#'
+#' @return A list containing:
+#' \describe{
+#'   \item{contingency_table}{Age × condition contingency table}
+#'   \item{class_balance}{List with class_ratio and class_imbalance}
+#'   \item{age_balance}{List with age_ratio and age_status}
+#'   \item{sample_size}{Data frame of sample counts per condition}
+#' }
+run_qc <- function(
+    cohort,
+    age_col = "age_category",
+    condition_col = "study_condition",
+    class_imbalance_mid = 2,
+    class_imbalance_high = 600,
+    age_imbalance_thresh = 0.3
+) {
+  
   meta <- as.data.frame(colData(cohort))
   
+  # Ensure metadata exist
   if (!all(c(age_col, condition_col) %in% colnames(meta))) {
     stop("Required metadata columns not found")
   }
   
-  tbl <- table(
+  # Create contingency table
+  contingency_table <- table(
     meta[[age_col]],
     meta[[condition_col]],
     useNA = "ifany"
   )
   
-  print(tbl)
-  
-  return(tbl)
-}
-
-
-#' Check class balance and return recommendation
-#' @param 
-#' @return
-check_class_balance <- function(cohort,
-                                condition_col = "study_condition",
-                                imbalance_mid = 2,
-                                imbalance_high = 600) 
-  {
-  meta <- as.data.frame(colData(cohort))
+  # Check class balance
   counts <- table(meta[[condition_col]])
   
   n_min <- min(counts)
@@ -129,84 +135,98 @@ check_class_balance <- function(cohort,
   
   class_ratio <- n_max / n_min
   
-  class_status <- if (class_ratio >= imbalance_high) {
-    "HIGH IMBALANCE"
-  } else if (class_ratio >= imbalance_mid) {
-    "MID IMBALANCE"
+  class_imbalance <- if (class_ratio > class_imbalance_high) {
+    paste0("high (>", class_imbalance_high, ")")
+  } else if (class_ratio > class_imbalance_mid) {
+    paste0("med (>", class_imbalance_mid, ")")
   } else {
-    "OK"
+    "low"
   }
   
-  result <- list(
+  class_balance <- list(
     class_ratio = class_ratio,
-    class_status = class_status
+    class_imbalance = class_imbalance
   )
   
-  print(result)
-  
-  return(result)
-}
-
-
-#' Check age balance and return recommendation
-check_age_balance <- function(cohort,
-                              age_col = "age_category",
-                              imbalance = 0.3,
-                              condition_col = "study_condition") 
-  {
-  meta <- as.data.frame(colData(cohort))
+  # Check age balance
   age_tab <- table(meta[[age_col]], meta[[condition_col]])
   age_prop <- prop.table(age_tab, margin = 2)
+  
   group_diffs <- combn(ncol(age_prop), 2, function(cols) {
     sum(abs(age_prop[, cols[1]] - age_prop[, cols[2]]))
   })
   
   age_ratio <- max(group_diffs)
   
-  age_status <- if (age_ratio > imbalance) {
-    "IMBALANCE"
+  age_status <- if (age_ratio > age_imbalance_thresh) {
+    paste0("high (>", age_imbalance_thresh, ")")
   } else {
-    "OK"
-    }
+    "low"
+  }
   
-  result <- list(
+  age_balance <- list(
     age_ratio = age_ratio,
     age_status = age_status
   )
   
-  print(result)
+  # Get sample size
+  sample_size <- as.data.frame(table(meta[[condition_col]]))
+  colnames(sample_size) <- c("condition", "n")
+  
+  # Return results
+  result <- list(
+    contingency_table = contingency_table,
+    class_balance = class_balance,
+    age_balance = age_balance,
+    sample_size = sample_size
+  )
   
   return(result)
 }
 
-#' Run Lefser by setting terminal nodes (age_category disabled)
-#' @param 
-#' @return
+#' Run LEfSe analysis on a cohort by performing:
+#' - Terminal node filtering
+#' - Relative abundance transformation
+#' - Subclass stratification only if:
+#'    * age_category exists
+#'    * at least 2 age groups are present
+#'    * all age groups contain both healthy and disease samples
+#' - LEfSe differential abundance analysis
+#'
+#' @param cohort A SummarizedExperiment / TreeSummarizedExperiment object
+#' @param comparison Optional name for logging/debugging
+#' @param subclassCol Column used for subclass stratification (default: age_category)
+#' @param seed Random seed for reproducibility
+#'
+#' @return LEfSe result object or NULL if analysis fails
 run_lefser <- function(cohort,
-                      comparison = NULL,
-                      subclassCol = "age_category",
-                      seed = 1234) {
+                       comparison = NULL,
+                       subclassCol = "age_category",
+                       seed = 1234) {
+  
   meta <- as.data.frame(colData(cohort))
   
   subclass <- NULL
   
+  # Enable/disable subclass: age_category when:
   if ("age_category" %in% colnames(meta)) {
     
     age_tab <- table(meta$age_category, meta$study_condition)
     
-    # 1. must have at least 2 age groups
+    ## there is more than one age group
     if (nrow(age_tab) < 2) {
-      message("No subclass: only one age group")
+      message("Subclass disabled: only one age group")
+      
     } else {
       
-      # 2. check each age group has BOTH classes
+      ## and each age group has both healthy x disease samples
       valid_strata <- apply(age_tab, 1, function(x) all(x > 0))
       
       if (all(valid_strata)) {
         subclass <- "age_category"
         message("Subclass enabled: age stratification valid")
       } else {
-        message("Subclass disabled: incomplete strata (some age groups lack class balance)")
+        message("Subclass disabled: some age groups lack class balance")
       }
     }
   }
@@ -217,16 +237,16 @@ run_lefser <- function(cohort,
     " | features = ", nrow(cohort)
   )
   
-  # Terminal node filtering
+  # Filter terminal node 
   tn <- get_terminal_nodes(rownames(cohort))
   cohort <- cohort[tn, , drop = FALSE]
   
-  # Relative abundance transform
+  # Transform relative abundance
   cohort <- relativeAb(cohort)
   
-  # LEfSe
+  # Run LEfSe
   set.seed(seed)
-
+  
   tryCatch({
     suppressWarnings(
       suppressMessages(
@@ -234,344 +254,253 @@ run_lefser <- function(cohort,
           cohort,
           classCol = "study_condition",
           subclassCol = subclass
-          )
         )
+      )
     )
   }, error = function(e) {
-    
-    message("ERROR in ", cohort, " | ", comparison, ": ", e$message)
+    message("ERROR in ", comparison, ": ", e$message)
     NULL
   })
 }
 
-# Storage objects for results --------------------------------------------------
-lefser_results <- list()
-contingency_tables <- list()
-class_balance_summary <- list()
-age_balance_summary   <- list()
-
-# TODO: return sample size number too 
-analysis_log <- data.frame(
-  cohort = character(),
-  comparison = character(),
-  status = character(),
-  reason = character(),
-  stringsAsFactors = FALSE
-)
-
-split_log <- data.frame(
-  cohort = character(),
-  unique_condition = character(),
-  combination = character(),
-  stringsAsFactors = FALSE
-)
-
-
-# Main analysis ----------------------------------------------------------------
-for (cohort_name in names(primary_cohorts)) {  
-  cohort <- primary_cohorts[[cohort_name]]
-  cohort <- clean_cohort(cohort)
-  cohort <- standardise_conditions(cohort)
+#' Format QC results into a summary data frame for logging purposes
+#'
+#' @param qc A list returned by \code{run_qc()}, containing class balance,
+#' age balance, and sample size information.
+#' @param comparison_name Character string identifying the cohort comparison.
+#'
+#' @return A one-row data frame containing:
+#' \describe{
+#'   \item{comparison}{Name of the cohort comparison}
+#'   \item{class_ratio}{Ratio of largest to smallest class size}
+#'   \item{class_imbalance}{Categorical description of class imbalance}
+#'   \item{age_ratio}{Maximum age distribution difference between groups}
+#'   \item{age_status}{Categorical description of age imbalance}
+#'   \item{sample_size}{Formatted string of sample counts per condition}
+#' }
+log_qc <- function(qc, comparison_name) {
   
-  ## extract study_conditions
-  info <- get_disease_groups(cohort)
-  
-  ## filter out cohorts with no healthy controls
-  if (!info$healthy_present) {
-    message("No healthy controls in ", cohort_name, ". Skipping.")
-    analysis_log <- rbind(
-      analysis_log,
-      data.frame(
-        comparison = cohort_name,
-        status = "SKIPPED",
-        reason = "No healthy controls"
-      )
-    )
-    next
-  }
-  ## filter out cohorts with healthy-only samples
-  if (info$n_diseases == 0) {
-    message("Only healthy samples in ", cohort_name, ". Skipping.")
-    analysis_log <- rbind(
-      analysis_log,
-      data.frame(
-        comparison = cohort_name,
-        status = "SKIPPED",
-        reason = "Healthy samples only"
-      )
-    )
-  ## for cohorts with healthy + 1 disease
-  } else if (info$n_diseases == 1) {
-    disease <- info$diseases
-    message("\n", cohort_name, ": healthy vs ", disease)
-    
-    ### QC: check and save contingency table, class and age balance
-    # TODO: one QC function to avoid repeating code?
-    comparison_name <- paste(cohort_name, disease, sep = "_")
-    
-    contingency_table <- get_contingency_table(cohort)
-    class_balance <- check_class_balance(cohort)
-    age_balance <- check_age_balance(cohort)
-    
-    class_balance_summary[[comparison_name]] <- class_balance
-    age_balance_summary[[comparison_name]]   <- age_balance
-    contingency_tables[[comparison_name]] <- contingency_table
-    
-    ### Record split log - confirm no of disease conditions = no of comparisons
-    # TODO: create function
-    meta_sub <- as.data.frame(colData(cohort))
-    
-    split_log <- rbind(
-      split_log,
-      data.frame(
-        cohort = cohort_name,
-        unique_condition = paste(sort(unique(meta_sub$study_condition)), collapse = ";"),
-        combination = paste("control", disease, sep = "+")
-      )
-    )
-    
-    ### run Lefser if class_status is not "SKIP"
-    if (class_balance$class_status != "HIGH IMBALANCE") {
-      res <- run_lefser(cohort, comparison = paste("control vs", disease))
-      
-      if (is.null(res)) {
-        analysis_log <- rbind(
-          analysis_log,
-          data.frame(
-            comparison = comparison_name,
-            status = "FAILED",
-            reason = "LEfSe returned NULL"
-          )
-        )
-        
-      } else {
-        analysis_log <- rbind(
-          analysis_log,
-          data.frame(
-            comparison = comparison_name,
-            status = "SUCCESS",
-            reason = paste("n_features =", nrow(res))
-          )
-        )
-        
-        lefser_results[[paste(cohort_name, disease, sep = "_")]] <- res
-      }
-      
-    } else {
-      message("Skipping Lefser due to class imbalance")
-    }
-    
-    
-
-    ## for cohorts with healthy + >1 disease
-  } else {
-    message("\n", cohort_name, ": healthy + ", info$n_diseases, " diseases")
-    
-    for (disease in info$diseases) {
-      message("\n", cohort_name, " subset: healthy vs ", disease)
-      
-      ### create subset of cohort (healthy + 1 disease)
-      meta <- as.data.frame(colData(cohort))
-      keep <- meta$study_condition %in% c("control", disease)
-      cohort_subset <- cohort[, keep]
-      cohort_subset <- standardise_conditions(cohort_subset)
-      
-      meta_sub <- as.data.frame(colData(cohort_subset))
-      
-      split_log <- rbind(
-        split_log,
-        data.frame(
-          cohort = cohort_name,
-          unique_condition = paste(sort(unique(meta_sub$study_condition)), collapse = ";"),
-          combination = paste("control", disease, sep = "+")
-        )
-      )
-      
-      ### QC: check and save contingency table, class and age balance
-      comparison_name <- paste(cohort_name, disease, sep = "_")
-      
-      contingency_table <- get_contingency_table(cohort_subset)
-      class_balance <- check_class_balance(cohort_subset)
-      age_balance <- check_age_balance(cohort_subset)
-      
-      class_balance_summary[[comparison_name]] <- class_balance
-      age_balance_summary[[comparison_name]]   <- age_balance
-      contingency_tables[[comparison_name]] <- contingency_table
-      
-      if (class_balance$class_status != "HIGH IMBALANCE") {
-        res <- run_lefser(cohort_subset, comparison = paste("control vs", disease))
-        
-        if (is.null(res)) {
-          analysis_log <- rbind(
-            analysis_log,
-            data.frame(
-              comparison = comparison_name,
-              status = "FAILED",
-              reason = "LEfSe returned NULL"
-            )
-          )
-          
-        } else {
-          analysis_log <- rbind(
-            analysis_log,
-            data.frame(
-              comparison = comparison_name,
-              status = "SUCCESS",
-              reason = paste("n_features =", nrow(res))
-            )
-          )
-          
-          lefser_results[[paste(cohort_name, disease, sep = "_")]] <- res
-        }
-        
-      } else {
-        message("Skipping Lefser due to class imbalance")
-        }
-    }
-  }
-}
-
-
-# Results and visualisation ----------------------------------------------------
-# Set output directory
-out_dir <- "results/discriminant_taxa"
-
-# Save as RData
-save(
-  lefser_results,
-  contingency_tables,
-  class_balance_summary,
-  age_balance_summary,
-  file = file.path(out_dir, "analysis_results.RData")
-)
-
-# Process lefser_results, contingency_tables, class_balance_summary and age_balance_summary 
-# TODO: make these into helper functions
-lefser_df <- do.call(
-  rbind,
-  lapply(names(lefser_results), function(nm) {
-    
-    res <- lefser_results[[nm]]
-    
-    if (is.null(res) || nrow(res) == 0)
-      return(NULL)
-    
-    df <- as.data.frame(res)
-    df$comparison <- nm
-    
-    df
-  })
-)
-
-contingency_df <- do.call(
-  rbind,
-  lapply(names(contingency_tables), function(comp) {
-    
-    tab <- contingency_tables[[comp]]
-    
-    df <- as.data.frame(tab)
-    
-    df$comparison <- comp
-    
-    df
-  })
-)
-
-class_balance_df <- do.call(
-  rbind,
-  lapply(names(class_balance_summary), function(x) {
-    data.frame(
-      comparison   = x,
-      class_ratio  = class_balance_summary[[x]]$class_ratio,
-      class_status = class_balance_summary[[x]]$class_status
-    )
-  })
-)
-
-age_balance_df <- do.call(
-  rbind,
-  lapply(names(age_balance_summary), function(x) {
-    data.frame(
-      comparison = x,
-      age_ratio  = age_balance_summary[[x]]$age_ratio,
-      age_status = age_balance_summary[[x]]$age_status
-    )
-  })
-)
-
-# Save results as csv files
-# TODO: again, one function
-write.csv(
-  lefser_df,
-  file.path(out_dir, "lefser_results_combined.csv"),
-  row.names = FALSE
-)
-
-write.csv(
-  contingency_df,
-  file.path(out_dir, "contingency_tables.csv"),
-  row.names = FALSE
-)
-
-summary_df <- merge(
-  class_balance_df,
-  age_balance_df,
-  by = "comparison"
-)
-
-write.csv(
-  summary_df,
-  file.path(out_dir, "class_age_summary.csv"),
-  row.names = FALSE
-)
-
-write.csv(
-  split_log,
-  file.path(out_dir, "split_log.csv"),
-  row.names = FALSE
-)
-
-write.csv(
-  analysis_log,
-  file.path(out_dir, "analysis_log.csv"),
-  row.names = FALSE
-)
-
-
-# Create Lefser plots and save
-dir.create(file.path(out_dir, "plots"), recursive = TRUE, showWarnings = FALSE)
-
-# TODO: make plots from csv and not use lefserplots
-
-for (name in names(lefser_results)) {
-  
-  res <- lefser_results[[name]]
-  
-  if (is.null(res)) next
-  
-  if (nrow(res) == 0) {
-    message("Skipping empty result: ", name)
-    next
-  } else if (nrow(res) < 3) {
-    message ("Skipping <1 significant feature in", name)
-    next
-  }
-  
-  p <- lefserPlot(res) +
-    theme(
-      plot.margin = margin(10, 40, 10, 60)
-    )
-  
-  safe_name <- gsub("[/\\\\]", "_", name)
-  
-  ggsave(
-    filename = file.path(out_dir, "plots", paste0(safe_name, ".png")),
-    plot = p,
-    bg = "white",
-    width = 12,
-    height = 8,
-    dpi = 300
+  data.frame(
+    comparison = comparison_name,
+    class_ratio = qc$class_balance$class_ratio,
+    class_imbalance = qc$class_balance$class_imbalance,
+    age_ratio = qc$age_balance$age_ratio,
+    age_status = qc$age_balance$age_status,
+    sample_size = paste(
+      paste(
+        qc$sample_size$condition,
+        qc$sample_size$n,
+        sep = "="
+      ),
+      collapse = "; "
+    ),
+    stringsAsFactors = FALSE
   )
 }
 
-# TODO: statistifcally analyse features in health/disease
+#' Convert named list of results into a combined data frame
+#'
+#' @param x Named list of objects (e.g., LEfSe results or contingency tables)
+#' @param transform_fn Function that converts each element into a data frame
+#'
+#' @return A combined data frame with a `comparison` column added
+bind_list_to_df <- function(x, transform_fn) {
+  
+  do.call(
+    rbind,
+    lapply(names(x), function(nm) {
+      
+      obj <- x[[nm]]
+      
+      if (is.null(obj))
+        return(NULL)
+      
+      df <- transform_fn(obj)
+      
+      if (is.null(df) || nrow(df) == 0)
+        return(NULL)
+      
+      df$comparison <- nm
+      
+      df
+    })
+  )
+}
+
+#' Write multiple data frames to CSV files
+#'
+#' @param out_dir Output directory path
+#' @param data_list Named list of data frames to write
+#'
+#' @return NULL (called for side effects)
+write_csvs <- function(out_dir, data_list) {
+  for (nm in names(data_list)) {
+    write.csv(
+      data_list[[nm]],
+      file.path(out_dir, paste0(nm, ".csv")),
+      row.names = FALSE
+    )
+  }
+}
+
+# Storage objects --------------------------------------------------------------
+pipeline <- list(
+  qc_summary = list(),
+  contingency_tables = list(),
+  analysis_log = list(),
+  lefser_results = list()
+)
+
+# Analysis ---------------------------------------------------------------------
+# Iterate for every cohort in primary_cohorts
+for (cohort_name in names(primary_cohorts)) {  
+  
+  # Clean cohort 
+  cohort <- primary_cohorts[[cohort_name]]
+  cohort <- clean_cohort(cohort)
+  
+  # Extract study_conditions
+  info <- get_disease_groups(cohort)
+  
+  # Filter out cohorts with no control (healthy) samples
+  if (!info$healthy_present) {
+    message("No control (healthy samples) in ", cohort_name, ". Skipping.")
+    
+    ## log analysis status and combination
+    pipeline$analysis_log[[length(pipeline$analysis_log) + 1]] <- data.frame(
+      comparison = comparison_name,
+      status = "SKIPPED",
+      reason = "No healthy samples"
+    )
+    
+    next
+  }
+  # Filter out cohorts with control (healthy) samples only
+  if (info$n_diseases == 0) {
+    message("Only healthy samples in ", cohort_name, ". Skipping.")
+    
+    ## log analysis status and combination
+    pipeline$analysis_log[[length(pipeline$analysis_log) + 1]] <- data.frame(
+      comparison = comparison_name,
+      status = "SKIPPED",
+      reason = "Healthy samples only"
+    )
+    
+    
+    # ANALYSIS BRANCH 1: healthy x 1 disease
+  } else if (info$n_diseases == 1) {
+    disease = info$diseases
+    
+    comparison_name <- paste(cohort_name, disease, sep = "_")
+    message("\n", cohort_name, ": healthy vs ", info$diseases)
+    
+    # Run QC and log results
+    qc <- run_qc(cohort)
+    
+    pipeline$qc_summary[[length(pipeline$qc_summary) + 1]] <- log_qc(qc, comparison_name)
+    pipeline$contingency_tables[[comparison_name]] <- qc$contingency_table
+    
+    # Perform Lefser, log analysis status/combination and save results
+    res <- run_lefser(cohort, comparison = paste("control vs", disease))
+    
+    if (is.null(res)) {
+      pipeline$analysis_log[[length(pipeline$analysis_log) + 1]] <- data.frame(
+        comparison = comparison_name,
+        status = "FAILED",
+        reason = "Lefse returned NULL"
+      )
+      
+    } else {
+      pipeline$analysis_log[[length(pipeline$analysis_log) + 1]] <- data.frame(
+        comparison = comparison_name,
+        status = "SUCCESS",
+        reason = paste("n_features =", nrow(res))
+      )
+      
+      pipeline$lefser_results[[comparison_name]] <- res
+    }
+    
+    # ANALYSIS BRANCH 2: healthy x >1 disease
+  } else {
+    
+    message("\n", cohort_name, ": healthy vs ", info$n_diseases, " diseases")
+    
+    for (disease in info$diseases) {
+      
+      message("\n", cohort_name, " subset: healthy vs ", disease)
+      
+      # Subset cohort for healthy x 1 disease
+      meta <- as.data.frame(colData(cohort))
+      keep <- meta$study_condition %in% c("control", disease)
+      cohort_subset <- cohort[, keep]
+      cohort_subset <- clean_cohort(cohort_subset)
+      
+      comparison_name <- paste(cohort_name, disease, sep = "_")
+      
+      # Run QC and log results
+      qc <- run_qc(cohort_subset)
+      
+      pipeline$qc_summary[[length(pipeline$qc_summary) + 1]] <- log_qc(qc, comparison_name)
+      pipeline$contingency_tables[[comparison_name]] <- qc$contingency_table
+      
+      # Perform Lefser, log analysis status/combination and save results
+      res <- run_lefser(cohort_subset, comparison = paste("control vs", disease))
+      
+      if (is.null(res)) {
+        pipeline$analysis_log[[length(pipeline$analysis_log) + 1]] <- data.frame(
+          comparison = comparison_name,
+          status = "FAILED",
+          reason = "LEfSe returned NULL"
+        )
+        
+      } else {
+        pipeline$analysis_log[[length(pipeline$analysis_log) + 1]] <- data.frame(
+          comparison = comparison_name,
+          status = "SUCCESS",
+          reason = paste("n_features =", nrow(res))
+        )
+        
+        pipeline$lefser_results[[comparison_name]] <- res
+      }
+    }
+  }
+}
+
+
+# Save results -----------------------------------------------------------------
+# Create/set output directory
+dir.create("results/lefser_analysis", recursive = TRUE, showWarnings = FALSE)
+out_dir <- "results/lefser_analysis"
+
+# Bulk save pipeline results 
+saveRDS(pipeline, file.path(out_dir, "pipeline.rds"))
+
+# Stack pipeline list of rows to single table 
+pipeline$analysis_log <- dplyr::bind_rows(pipeline$analysis_log)
+pipeline$qc_summary <- dplyr::bind_rows(pipeline$qc_summary)
+
+# Convert pipeline lists to dataframes
+pipeline$lefser_df <- bind_list_to_df(
+  pipeline$lefser_results,
+  function(res) as.data.frame(res)
+)
+
+pipeline$contingency_df <- bind_list_to_df(
+  pipeline$contingency_tables,
+  function(tbl) {
+    df <- as.data.frame(as.table(tbl))
+    names(df) <- c("age_category", "condition", "count")
+    df
+  }
+)
+
+# Save pipeline dfs as CSVs
+write_csvs(
+  out_dir,
+  list(
+    lefser_results_combined = pipeline$lefser_df,
+    contingency_tables = pipeline$contingency_df,
+    qc_summary = pipeline$qc_summary,
+    analysis_log = pipeline$analysis_log
+  )
+)
