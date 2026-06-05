@@ -20,6 +20,10 @@ source("src/datasets.R")
 source("src/handler.R")
 
 
+# Define output directory ------------------------------------------------------
+out_dir <- "results/lefser_analysis"
+
+
 # Load data --------------------------------------------------------------------
 # Optional: build primary_cohorts for scratch and save
 # primary_cohorts <- load_cohorts(primary_cohort_names)
@@ -28,6 +32,7 @@ source("src/handler.R")
 
 # Load primary_cohorts after saving as rds
 primary_cohorts <- readRDS("data/primary_cohorts.rds")
+
 
 # Define helper functions ------------------------------------------------------
 #' Clean cohort by removing invalid or missing study_condition values
@@ -609,26 +614,6 @@ export_pipeline <- function(pipeline, out_dir) {
 }
 
 
-#' Execute full LEfSe analysis workflow across all cohorts nad export all results
-#;
-#' @param primary_cohorts A named list of cohort objects to be analysed
-#' @param out_dir Character string specifying the output directory 
-#'
-#' @return Invisibly returns the full `pipeline` object containing:
-#'   `qc_summary`: QC summaries for each comparison
-#'   `contingency_tables`: Contingency tables per comparison
-#'   `analysis_log`: Analysis status log (success/failure/skipped)
-#'   `lefser_results`: Raw LEfSe result objects
-#'   `lefser_df`: Combined LEfSe results (added during export)
-#'   `contingency_df`: Long-format contingency tables (added during export)
-main <- function(primary_cohorts, out_dir = "results/lefser_analysis") {
-  
-  pipeline <- run_pipeline(primary_cohorts)
-  export_pipeline(pipeline, out_dir)
-  
-  return(pipeline)
-}
-
 # Run --------------------------------------------------------------------------
-pipeline <- main(primary_cohorts)
-
+pipeline <- run_pipeline(primary_cohorts)
+export_pipeline(pipeline, out_dir)
