@@ -4,8 +4,10 @@ if (!requireNamespace("BiocManager", quietly = TRUE))
 
 # CRAN packages
 cran_packages <- c(
+  "dplyr",
   "ggplot2",
-  "patchwork"
+  "patchwork",
+  "stringr"
 )
 
 # Bioconductor packages
