@@ -21,7 +21,7 @@ source("src/handler.R")
 
 
 # Define output directory ------------------------------------------------------
-out_dir <- "results/lefser_analysis"
+out_dir <- "results/lefse_analysis"
 
 
 # Load data --------------------------------------------------------------------
@@ -428,7 +428,7 @@ write_csvs <- function(out_dir, data_list) {
 #'   `qc_summary`: List of QC summaries for each comparison
 #'   `contingency_tables`: Named list of contingency tables per comparison
 #'   `analysis_log`: List of success/failure/skipped status entries
-#'   `lefser_results`: Named list of LEfSe result objects
+#'   `lefse_results`: Named list of LEfSe result objects
 run_pipeline <- function(primary_cohorts) {
   
   # Initialise storage objects
@@ -436,7 +436,7 @@ run_pipeline <- function(primary_cohorts) {
     qc_summary = list(),
     contingency_tables = list(),
     analysis_log = list(),
-    lefser_results = list()
+    lefse_results = list()
   )
   
   for (cohort_name in names(primary_cohorts)) {  
@@ -489,7 +489,7 @@ run_pipeline <- function(primary_cohorts) {
       
       pipeline <- log_analysis(pipeline, res, comparison_name)
       
-      pipeline$lefser_results[[comparison_name]] <- res
+      pipeline$lefse_results[[comparison_name]] <- res
       
       res_df <- as.data.frame(res)
       
@@ -498,7 +498,7 @@ run_pipeline <- function(primary_cohorts) {
         res_df$disease <- disease
         res_df$comparison <- comparison_name
         
-        pipeline$lefser_results[[comparison_name]] <- res_df
+        pipeline$lefse_results[[comparison_name]] <- res_df
       } else {
         message("No LEfSe hits for ", comparison_name)
       }
@@ -535,7 +535,7 @@ run_pipeline <- function(primary_cohorts) {
         
         pipeline <- log_analysis(pipeline, res, comparison_name)
         
-        pipeline$lefser_results[[comparison_name]] <- res
+        pipeline$lefse_results[[comparison_name]] <- res
         
         res_df <- as.data.frame(res)
         
@@ -544,7 +544,7 @@ run_pipeline <- function(primary_cohorts) {
           res_df$disease <- disease
           res_df$comparison <- comparison_name
           
-          pipeline$lefser_results[[comparison_name]] <- res_df
+          pipeline$lefse_results[[comparison_name]] <- res_df
         } else {
           message("No LEfSe hits for ", comparison_name)
         }
@@ -580,7 +580,7 @@ export_pipeline <- function(pipeline, out_dir) {
   
   # LEfSe results
   pipeline$lefser_df <- bind_list_to_df(
-    pipeline$lefser_results,
+    pipeline$lefse_results,
     function(res) {
       df <- as.data.frame(res)
       if (nrow(df) == 0) return(NULL)
@@ -605,7 +605,7 @@ export_pipeline <- function(pipeline, out_dir) {
   write_csvs(
     out_dir,
     list(
-      lefser_results = pipeline$lefser_df,
+      lefse_results = pipeline$lefser_df,
       contingency_tables = pipeline$contingency_df,
       qc_summary = pipeline$qc_summary,
       analysis_log = pipeline$analysis_log

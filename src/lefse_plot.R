@@ -7,8 +7,8 @@ library(stringr)
 
 
 # Define input/output directory ------------------------------------------------
-in_dir <- "results/lefser_analysis"
-out_dir <- "results/lefser_analysis/plots"
+in_dir <- "results/lefse_analysis"
+out_dir <- "results/lefse_analysis/plots"
 
 
 # Load data --------------------------------------------------------------------
