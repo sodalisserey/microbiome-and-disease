@@ -1,17 +1,17 @@
 # Conduct LEfSe analysis using lefser package
 # 1. Read dataset registry from datasets.R and load cohorts via handler.R
-# 2. Define helper functions
-# 3. Define analysis pipeline:
-#    * Clean and extract disease from study_conditions
-#    * ANALYSIS BRANCH 1: healthy x 1 disease  -> 
+# 2. Run main() which calls:
+#   a. Analysis function: run_pipeline()
+#     * Clean and extract disease from study_conditions
+#     * ANALYSIS BRANCH 1: healthy x 1 disease  -> 
 #       - Run QC (contingency table, class/age balance, sample size)
 #       - Perform LEfSe
-#    * ANALYSIS BRANCH 2: healthy x >1 disease  -> 
+#     * ANALYSIS BRANCH 2: healthy x >1 disease  -> 
 #       - Create pair-wise subsets (healthy vs disease) and on each subset:
 #       - Run QC (contingency table, class/age balance, sample size)
 #       - Perform LEfSe
-# 4. Bulk save analysis/QC log and pipeline results
-
+#   b. Export function: export_pipeline()
+#     * Bulk save analysis/QC log and pipeline results
 
 # Load packages and dependencies -----------------------------------------------
 library(curatedMetagenomicData)
@@ -393,66 +393,8 @@ write_csvs <- function(out_dir, data_list) {
   message("\nDone. CSVs written to: ", file.path(out_dir))
 }
 
-#' Export LEfSe analysis pipeline outputs as raw R objects and CSVs
-#'
-#' @param pipeline A named list containing pipeline outputs
-#'
-#' @param out_dir Character string specifying output directory 
-#' 
-#' @return Invisibly returns the updated pipeline object with additional fields:
-#' \describe{
-#'   \item{analysis_log}{Data frame of analysis status entries}
-#'   \item{qc_summary}{Data frame of QC summaries}
-#'   \item{lefser_df}{Tidy combined LEfSe results}
-#'   \item{contingency_df}{Long-format contingency table data}
-export_pipeline <- function(pipeline, out_dir) {
-  
-  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  
-  # Save full object
-  saveRDS(pipeline, file.path(out_dir, "pipeline.rds"))
-  
-  # Bind logs
-  pipeline$analysis_log <- dplyr::bind_rows(pipeline$analysis_log)
-  pipeline$qc_summary <- dplyr::bind_rows(pipeline$qc_summary)
-  
-  # LEfSe results
-  pipeline$lefser_df <- bind_list_to_df(
-    pipeline$lefser_results,
-    function(res) {
-      df <- as.data.frame(res)
-      if (nrow(df) == 0) return(NULL)
-      
-      df$disease <- attr(res, "case")
-      df$control <- attr(res, "lclassf")
-      df
-    }
-  )
-  
-  # Contingency tables
-  pipeline$contingency_df <- bind_list_to_df(
-    pipeline$contingency_tables,
-    function(tbl) {
-      df <- as.data.frame(as.table(tbl))
-      names(df) <- c("age_category", "condition", "count")
-      df
-    }
-  )
-  
-  # Write CSVs
-  write_csvs(
-    out_dir,
-    list(
-      lefser_results = pipeline$lefser_df,
-      contingency_tables = pipeline$contingency_df,
-      qc_summary = pipeline$qc_summary,
-      analysis_log = pipeline$analysis_log
-    )
-  )
-}
 
-
-# Define analysis pipeline -----------------------------------------------------
+# Define main functions --------------------------------------------------------
 #' Run full LEfSe analysis pipeline across multiple cohorts
 #'
 #' This function executes the complete analysis workflow for a list of cohorts,
@@ -608,7 +550,65 @@ run_pipeline <- function(primary_cohorts) {
 }
 
 
-# Define main ------------------------------------------------------------------
+#' Export LEfSe analysis pipeline outputs as raw R objects and CSVs
+#'
+#' @param pipeline A named list containing pipeline outputs
+#'
+#' @param out_dir Character string specifying output directory 
+#' 
+#' @return Invisibly returns the updated pipeline object with additional fields:
+#' \describe{
+#'   \item{analysis_log}{Data frame of analysis status entries}
+#'   \item{qc_summary}{Data frame of QC summaries}
+#'   \item{lefser_df}{Tidy combined LEfSe results}
+#'   \item{contingency_df}{Long-format contingency table data}
+export_pipeline <- function(pipeline, out_dir) {
+  
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  # Save full object
+  saveRDS(pipeline, file.path(out_dir, "pipeline.rds"))
+  
+  # Bind logs
+  pipeline$analysis_log <- dplyr::bind_rows(pipeline$analysis_log)
+  pipeline$qc_summary <- dplyr::bind_rows(pipeline$qc_summary)
+  
+  # LEfSe results
+  pipeline$lefser_df <- bind_list_to_df(
+    pipeline$lefser_results,
+    function(res) {
+      df <- as.data.frame(res)
+      if (nrow(df) == 0) return(NULL)
+      
+      df$disease <- attr(res, "case")
+      df$control <- attr(res, "lclassf")
+      df
+    }
+  )
+  
+  # Contingency tables
+  pipeline$contingency_df <- bind_list_to_df(
+    pipeline$contingency_tables,
+    function(tbl) {
+      df <- as.data.frame(as.table(tbl))
+      names(df) <- c("age_category", "condition", "count")
+      df
+    }
+  )
+  
+  # Write CSVs
+  write_csvs(
+    out_dir,
+    list(
+      lefser_results = pipeline$lefser_df,
+      contingency_tables = pipeline$contingency_df,
+      qc_summary = pipeline$qc_summary,
+      analysis_log = pipeline$analysis_log
+    )
+  )
+}
+
+
 #' Execute full LEfSe analysis workflow across all cohorts nad export all results
 #;
 #' @param primary_cohorts A named list of cohort objects to be analysed
@@ -629,5 +629,6 @@ main <- function(primary_cohorts, out_dir = "results/lefser_analysis") {
   return(pipeline)
 }
 
+# Run --------------------------------------------------------------------------
 pipeline <- main(primary_cohorts)
 
