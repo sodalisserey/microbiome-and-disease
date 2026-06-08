@@ -1,34 +1,58 @@
 # Utility functions for reading and writing curatedMetagenomicData cohorts
 
-# Load packages
+# Load packages and dependencies -----------------------------------------------
 library(curatedMetagenomicData)
 library(SummarizedExperiment)
 
 
-#' Load every dataset listed in datasets.R
-#' 
-#' @param cohorts  Named list as defined in datasets.R 
-#' @return Named list of SummarizedExperiment objects (NULL on failure)
+# Define functions -------------------------------------------------------------
 
-load_cohorts <- function(cohorts) {
+#'
+read_cohort_list <- function(path) {
   
-  loaded <- lapply(cohorts, function(study) {
-    message("\n[handler] Loading: ", study)
-    
-    tryCatch(
-      curatedMetagenomicData(
-        paste0(study, ".relative_abundance"),
-        dryrun = FALSE
-        )[[1]],
-      error = function(e) {
-        message("  ERROR loading ", study, ": ", e$message)
-        return(NULL)
-      }
-    )
-  })
+  lines <- readLines(path, warn = FALSE)
   
-  names(loaded) <- cohorts
-  loaded
+  # Remove comments + trim whitespace
+  lines <- trimws(lines)
+  lines <- lines[lines != ""]
+  lines <- lines[!grepl("^#", lines)]
+  
+  unique(lines)
 }
 
+#'
+load_cohorts <- function(cohorts) {
+  
+  cohorts <- read_cohort_list("data/primary.txt")
+  
+  out <- lapply(cohorts, function(study) {
+    message("\n[handler] Loading: ", study)
+    
+    tryCatch({
+      
+      obj <- curatedMetagenomicData(
+        paste0(study, ".relative_abundance"),
+        dryrun = FALSE
+      )[[1]]
+      
+      abundance <- assay(obj)   
+      metadata  <- colData(obj)
+      
+      list(
+        object = obj,    
+        abundance = abundance,
+        metadata = metadata   
+      )
+      
+    }, error = function(e) {
+      message("  ERROR loading ", study, ": ", e$message)
+      NULL
+    })
+  })
+  
+  names(out) <- cohorts
+  out
+}
 
+# Read and save cohorts --------------------------------------------------------
+saveRDS(load_cohorts(primary_cohort_names), "data/primary_cohorts.rds")
