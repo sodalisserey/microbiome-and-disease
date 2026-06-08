@@ -12,7 +12,7 @@ out_dir <- "results/lefse_analysis/plots"
 
 
 # Load data --------------------------------------------------------------------
-df <- read.csv(file.path(in_dir, "lefser_results.csv"), stringsAsFactors = FALSE)
+df <- read.csv(file.path(in_dir, "lefse_results.csv"), stringsAsFactors = FALSE)
 
 
 # Define helper functions ------------------------------------------------------

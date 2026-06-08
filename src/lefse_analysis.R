@@ -27,7 +27,6 @@ out_dir <- "results/lefse_analysis"
 # Load data --------------------------------------------------------------------
 # Optional: build primary_cohorts for scratch and save
 # primary_cohorts <- load_cohorts(primary_cohort_names)
-# 
 # saveRDS(primary_cohorts, "data/primary_cohorts.rds")
 
 # Load primary_cohorts after saving as rds
@@ -107,8 +106,9 @@ run_qc <- function(
     age_col = "age_category",
     condition_col = "study_condition",
     class_imbalance_mid = 2,
-    class_imbalance_high = 600,
-    age_imbalance_thresh = 0.3
+    class_imbalance_high = 5,
+    class_imbalance_severe = 10,
+    age_imbalance_thresh = 0.25
 ) {
   
   meta <- as.data.frame(colData(cohort))
@@ -133,10 +133,12 @@ run_qc <- function(
   
   class_ratio <- n_max / n_min
   
-  class_imbalance <- if (class_ratio > class_imbalance_high) {
-    paste0("high (>", class_imbalance_high, ")")
+  class_imbalance <- if (class_ratio > class_imbalance_severe) {
+    "severe"
+  } else if (class_ratio > class_imbalance_high) {
+    "high"
   } else if (class_ratio > class_imbalance_mid) {
-    paste0("med (>", class_imbalance_mid, ")")
+    "moderate"
   } else {
     "low"
   }
