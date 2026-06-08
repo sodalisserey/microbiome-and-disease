@@ -4,6 +4,7 @@
 # Already filtered for stool samples only, with healthy + (≥1 disease)
 primary_cohort_names <- c(
   "BedarfJR_2017",
+  "BrooksB_2017",
   "DavidLA_2015",
   "GuptaA_2019",
   "HMP_2019_ibdmdb",
