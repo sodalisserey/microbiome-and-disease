@@ -102,6 +102,10 @@ process_conditions <- function(cohort,
 
 
 # Read and save cohorts --------------------------------------------------------
-primary_cohorts <- read_cohort_list("data/primary.txt")
+# primary_cohorts <- read_cohort_list("data/primary.txt")
+# saveRDS(load_cohorts(primary_cohorts), "data/primary_cohorts.rds")
+# primary_cohorts <- readRDS("data/primary_cohorts.rds")
 
-#saveRDS(load_cohorts(primary_cohorts), "data/primary_cohorts.rds")
+# test_cohorts <- read_cohort_list("data/test.txt")
+# saveRDS(load_cohorts(test_cohorts), "data/test_cohorts.rds")
+# test_cohorts <- readRDS("data/test_cohorts.rds")
