@@ -17,10 +17,6 @@ df <- read.csv(file.path(in_dir, "lefse_results.csv"), stringsAsFactors = FALSE)
 
 # Define helper functions ------------------------------------------------------
 #' Extract species label from full clade string
-#'
-#' @param df A dataframe containing a `features` column with taxonomic strings
-#' @return The input dataframe with an additional `species` column containing 
-#' simplified species names
 extract_species <- function(df) {
   df %>%
     dplyr::mutate(
@@ -36,11 +32,7 @@ extract_species <- function(df) {
     )
 }
 
-#' Convert disease label to smart title case
-#'
-#' @param x Character input string, possibly containing underscores
-#' 
-#' @return Character string with underscores replaced by spaces and title-cased
+#' Convert disease label string with underscores to title case
 smart_case <- function(x) {
   x <- gsub("_", " ", x)
   
@@ -56,13 +48,6 @@ smart_case <- function(x) {
 }
 
 #' Prepare LEfSe plot data by filtering scores and assigning healthy/disease label
-#'
-#' @param df_sub A subset of the main dataframe for a specific comparison
-#' @param disease_label Character label for the disease group
-#' @param healthy_label Character label for the healthy group
-#' @param max_features Maximum number of features to include in the plot
-#' 
-#' @return A dataframe ready for plotting, with `scores` and `group_label`
 get_plot_data <- function(df_sub,
                           disease_label,
                           healthy_label,
@@ -90,13 +75,6 @@ get_plot_data <- function(df_sub,
 }
 
 #' Build a LEfSe bar plot using ggplot2
-#'
-#' @param df_sub A dataframe prepared for plotting (output of `get_plot_data()`)
-#' @param cohort_name Name of the cohort for the plot title
-#' @param disease_label Character label for the disease group
-#' @param healthy_label Character label for the healthy group
-#' 
-#' @return A ggplot object representing the LEfSe bar plot
 create_single_plot <- function(df_sub,
                                cohort_name,
                                disease_label,
@@ -158,14 +136,7 @@ create_single_plot <- function(df_sub,
     )
 }
 
-#' Save a single plot as a PDF file
-#'
-#' @param plot A ggplot object to save
-#' @param comparison Name of the comparison, used for the filename
-#' @param out_dir Directory where the plot will be saved
-#' @param n_features Number of features in the plot (controls height)
-#' 
-#' @return Invisible character string of the saved file path
+#' Save a single plot as a pdf
 save_single_plot <- function(plot,
                              comparison,
                              out_dir,
@@ -191,14 +162,8 @@ save_single_plot <- function(plot,
   invisible(out_path)
 }
 
-#' Create a single log entry for plot processing
-#'
-#' @param comp Name of the comparison
-#' @param n_features Number of features in the comparison
-#' @param status Status of the plot ("PLOTTED" or "SKIPPED")
-#' @param reason Character or NA with optional reason for skipping
-#' 
-#' @return A one-row dataframe logging the plot status
+#' Create a single log entry consisting of: comparison (healthy x disease), 
+#' number of features, plotting status and reason
 create_log <- function(comp, n_features, status, reason = NA) {
   data.frame(
     comparison = comp,
@@ -210,15 +175,6 @@ create_log <- function(comp, n_features, status, reason = NA) {
 }
 
 #' Process comparison, update plot status (skipped/plotted) and reason
-#'
-#' @param df_sub A subset of the main data.frame for a specific comparison
-#' @param comparison Name of the comparison
-#' @param out_dir Directory to save plots
-#' @param min_features Minimum number of features required to plot
-#' @param max_features Maximum number of features to plot
-#' 
-#' @return A dataframe row recording the comparison, number of features, plotted 
-#' features, status and reason
 update_log <- function(df_sub,
                             comparison,
                             out_dir,
@@ -303,20 +259,7 @@ update_log <- function(df_sub,
 
 
 # Define main function ---------------------------------------------------------
-#' Generate and save LEfSe plots for all comparisons
-#'
-#' @param df A dataframe containing LefSe results, including columns:`comparison`
-#' `cohort`, `disease`, `features`, `scores`
-#' @param out_dir Directory to save plots and the plot log CSV.
-#' @param min_features Minimum number of features to generate plot (default 3)
-#' @param max_features Maximum number of features included in a plot (default 30)
-#' 
-#' @return A dataframe summarizing all comparisons, including:
-#'   `comparison`: Comparison name
-#'   `n_features`: Number of features in the input data
-#'   `plotted_features`: Number of features actually plotted
-#'   `status`: "PLOTTED" or "SKIPPED"
-#'   `reason`: Reason for skipping, if applicable
+#' Generate, save and log LEfSe plots for all comparisons
 create_and_save_plots <- function(df,
                               out_dir,
                               min_features = 3,
@@ -355,6 +298,8 @@ create_and_save_plots <- function(df,
   )
   
   invisible(plot_log_df)
+  
+  message("Done. Plots written to: ", out_dir)
 }
 
 

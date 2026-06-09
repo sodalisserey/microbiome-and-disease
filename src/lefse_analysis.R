@@ -1,5 +1,5 @@
 # Conduct LEfSe analysis using lefser package
-# 1. Read dataset registry from datasets.R and load cohorts via handler.R
+# 1. Read and extract primary cohorts via handler.R
 # 2. Run main() which calls:
 #   a. Analysis function: run_pipeline()
 #     * Clean and extract disease from study_conditions
@@ -16,91 +16,60 @@
 # Load packages and dependencies -----------------------------------------------
 library(curatedMetagenomicData)
 library(lefser)
-source("src/datasets.R")
 source("src/handler.R")
 
 
 # Define output directory ------------------------------------------------------
+dir.create("results", recursive = TRUE, showWarnings = FALSE)
 out_dir <- "results/lefse_analysis"
 
 
-# Load data --------------------------------------------------------------------
-# Optional: build primary_cohorts for scratch and save
-# primary_cohorts <- load_cohorts(primary_cohort_names)
-# saveRDS(primary_cohorts, "data/primary_cohorts.rds")
-
-# Load primary_cohorts after saving as rds
-primary_cohorts <- readRDS("data/primary_cohorts.rds")
+# Load and extract data --------------------------------------------------------
+primary_cohorts <- readRDS("data/primary_cohorts.rds") |>
+  create_cohort_objects()
 
 
 # Define helper functions ------------------------------------------------------
 #' Clean cohort by removing invalid or missing study_condition values
-#'
-#' @param cohort A SummarizedExperiment / TreeSummarizedExperiment object
-#' @return A filtered cohort object with invalid samples removed
-clean_cohort <- function(cohort) {
-  
-  meta <- as.data.frame(colData(cohort))
-  meta$study_condition <- as.character(meta$study_condition)
-  
-  # Remove samples where study_condition is NA, empty or whitespace only
-  keep <- !is.na(meta$study_condition) &
-    meta$study_condition != "" &
-    meta$study_condition != " "
-  
-  cohort <- cohort[, keep]
-  
-  return(cohort)
-}
-
-#' Identify and extract healthy and disease groups from study_condition metadata
-#' @param cohort A SummarizedExperiment / TreeSummarizedExperiment object
-#' @param condition_col Column name containing sample condition labels
-#' @param healthy_label Label used for healthy/control samples
-#' @return A list with:
-#'   healthy_present: Logical, whether healthy samples exist
-#'   diseases: Character vector of disease labels
-#'   n_diseases: Number of disease conditions
+#' clean_cohort <- function(cohort) {
+#' 
+#'   meta <- as.data.frame(colData(cohort))
+#'   meta$study_condition <- as.character(meta$study_condition)
+#'   
+#'   # Remove samples where study_condition is NA, empty or whitespace only
+#'   keep <- !is.na(meta$study_condition) &
+#'     meta$study_condition != "" &
+#'     meta$study_condition != " "
+#'   
+#'   cohort <- cohort[, keep]
+#'   
+#'   return(cohort)
 #' }
-get_disease_groups <- function(cohort,
-                               condition_col = "study_condition",
-                               healthy_label = "control") {
-  
-  meta <- as.data.frame(colData(cohort))
-  
-  # Extract condition vector, remove NAs and return unique conditions
-  conditions <- meta[[condition_col]]
-  conditions <- conditions[!is.na(conditions)]
-  conditions <- unique(conditions)
-  
-  # Disease labels = every study_condition except healthy
-  diseases <- setdiff(conditions, healthy_label)
-  
-  list(
-    healthy_present = healthy_label %in% conditions,
-    diseases = diseases,
-    n_diseases = length(diseases)
-  )
-}
+#' 
+#' #' Extract healthy and disease groups from a cohort's study_condition metadata
+#' get_disease_groups <- function(cohort,
+#'                                condition_col = "study_condition",
+#'                                healthy_label = "control") {
+#'   
+#'   meta <- as.data.frame(colData(cohort))
+#'   
+#'   # Extract condition vector, remove NAs and return unique conditions
+#'   conditions <- meta[[condition_col]]
+#'   conditions <- conditions[!is.na(conditions)]
+#'   conditions <- unique(conditions)
+#'   
+#'   # Disease labels = every study_condition except healthy
+#'   diseases <- setdiff(conditions, healthy_label)
+#'   
+#'   list(
+#'     healthy_present = healthy_label %in% conditions,
+#'     diseases = diseases,
+#'     n_diseases = length(diseases)
+#'   )
+#' }
 
-#' Run QC checks on a cohort and compute:
-#' - contingency table (age_category × study_condition)
-#' - class imbalance 
-#' - age distribution imbalance
-#' - sample sizes per condition
-#'
-#' @param cohort A SummarizedExperiment / TreeSummarizedExperiment object
-#' @param age_col Column name for age grouping variable
-#' @param condition_col Column name for study condition
-#' @param class_imbalance_mid Threshold for moderate class imbalance
-#' @param class_imbalance_high Threshold for high class imbalance
-#' @param age_imbalance_thresh Threshold for age distribution imbalance
-#'
-#' @return A list containing:
-#'   `contingency_table`: Age × condition contingency table
-#'   `class_balance`: List with class_ratio and class_imbalance
-#'   `age_balance`: List with age_ratio and age_status
-#'   `sample_size`: Data frame of sample counts per condition
+#' Run QC checks on a cohort and return a contingency table, class imbalance and 
+#' age imbalance ratios and sample sizes
 run_qc <- function(
     cohort,
     age_col = "age_category",
@@ -158,7 +127,7 @@ run_qc <- function(
   
   age_ratio <- max(group_diffs)
   
-  age_status <- if (age_ratio > age_imbalance_thresh) {
+  age_imbalance <- if (age_ratio > age_imbalance_thresh) {
     paste0("high (>", age_imbalance_thresh, ")")
   } else {
     "low"
@@ -166,7 +135,7 @@ run_qc <- function(
   
   age_balance <- list(
     age_ratio = age_ratio,
-    age_status = age_status
+    age_imbalance = age_imbalance
   )
   
   # Get sample size
@@ -192,13 +161,6 @@ run_qc <- function(
 #'    * at least 2 age groups are present
 #'    * all age groups contain both healthy and disease samples
 #' - LEfSe differential abundance analysis
-#'
-#' @param cohort A SummarizedExperiment / TreeSummarizedExperiment object
-#' @param comparison Optional name for logging/debugging
-#' @param subclassCol Column used for subclass stratification (default: age_category)
-#' @param seed Random seed for reproducibility
-#'
-#' @return LEfSe result object or NULL if analysis fails
 run_lefser <- function(cohort,
                        comparison = NULL,
                        subclassCol = "age_category",
@@ -273,19 +235,8 @@ run_lefser <- function(cohort,
   })
 }
 
-#' Format QC results into a summary data frame for logging purposes
-#'
-#' @param qc A list returned by `run_qc()`, containing class balance,
-#' age balance, and sample size information.
-#' @param comparison_name Character string identifying the cohort comparison.
-#'
-#' @return A one-row data frame containing:
-#'   `comparison`: Name of the cohort comparison
-#'   `class_ratio`: Ratio of largest to smallest class size
-#'   `class_imbalance`: Categorical description of class imbalance
-#'   `age_ratio`: Maximum age distribution difference between groups
-#'   `age_status`: Categorical description of age imbalance
-#'   `sample_size`: Formatted string of sample counts per condition
+#' Format QC results into a summary data frame containing: comparison (health x 
+#' disease), class ratio, class imbalance, age ratio, age imbalance and sample size
 log_qc <- function(qc, comparison_name) {
   
   data.frame(
@@ -293,7 +244,7 @@ log_qc <- function(qc, comparison_name) {
     class_ratio = qc$class_balance$class_ratio,
     class_imbalance = qc$class_balance$class_imbalance,
     age_ratio = qc$age_balance$age_ratio,
-    age_status = qc$age_balance$age_status,
+    age_imbalance = qc$age_balance$age_imbalance,
     sample_size = paste(
       paste(
         qc$sample_size$condition,
@@ -306,13 +257,7 @@ log_qc <- function(qc, comparison_name) {
   )
 }
 
-#' Log LEfSe analysis status for a single comparison
-#'
-#' @param pipeline A named list containing pipeline outcomes
-#' @param res Output object from `run_lefser()`
-#' @param comparison_name Character string identifying the comparison
-#'
-#' @return The updated pipeline list with an appended entry in `analysis_log`.
+#' Log LEfSe analysis status and reason for a single comparison
 log_analysis <- function(pipeline, res, comparison_name) {
   
   if (is.null(res)) {
@@ -355,11 +300,6 @@ log_analysis <- function(pipeline, res, comparison_name) {
 }
 
 #' Convert named list of results into a combined data frame
-#'
-#' @param x Named list of objects (e.g., LEfSe results or contingency tables)
-#' @param transform_fn Function that converts each element into a data frame
-#'
-#' @return A combined data frame with a `comparison` column added
 bind_list_to_df <- function(x, transform_fn) {
   
   do.call(
@@ -384,11 +324,6 @@ bind_list_to_df <- function(x, transform_fn) {
 }
 
 #' Write multiple data frames to CSV files
-#'
-#' @param out_dir Output directory path
-#' @param data_list Named list of data frames to write
-#'
-#' @return NULL (called for side effects)
 write_csvs <- function(out_dir, data_list) {
   for (nm in names(data_list)) {
     write.csv(
@@ -402,10 +337,9 @@ write_csvs <- function(out_dir, data_list) {
 
 
 # Define main functions --------------------------------------------------------
-#' Run full LEfSe analysis pipeline across multiple cohorts
-#'
-#' This function executes the complete analysis workflow for a list of cohorts,
-#' including preprocessing, cohort validation, quality control, and LEfSe analysis
+#' Run full LEfSe analysis pipeline and return list of results by executing the 
+#' complete analysis workflow for a list of cohorts, including preprocessing, 
+#' cohort validation, quality control, and LEfSe analysis
 #'
 #' Each cohort is evaluated for the presence of healthy (control) and disease
 #' samples, and the appropriate analysis branch is applied:
@@ -420,17 +354,6 @@ write_csvs <- function(out_dir, data_list) {
 #'   Runs QC using `run_qc()`
 #'   Runs LEfSe analysis using `run_lefser()`
 #'   Logs results using `log_qc()` and `log_analysis()`
-#' }
-#'
-#' @param primary_cohorts A named list of cohort objects (typically
-#' `SummarizedExperiment` or similar), where each element represents a dataset
-#' to be analysed
-#'
-#' @return A named list `pipeline` containing:
-#'   `qc_summary`: List of QC summaries for each comparison
-#'   `contingency_tables`: Named list of contingency tables per comparison
-#'   `analysis_log`: List of success/failure/skipped status entries
-#'   `lefse_results`: Named list of LEfSe result objects
 run_pipeline <- function(primary_cohorts) {
   
   # Initialise storage objects
@@ -443,12 +366,9 @@ run_pipeline <- function(primary_cohorts) {
   
   for (cohort_name in names(primary_cohorts)) {  
     
-    # Clean cohort 
+    # Process and extract study_conditions from cohort
     cohort <- primary_cohorts[[cohort_name]]
-    cohort <- clean_cohort(cohort)
-    
-    # Extract study_conditions
-    info <- get_disease_groups(cohort)
+    info <- process_conditions(cohort)
     
     # Filter out cohorts with no control (healthy) samples
     if (!info$healthy_present || info$n_diseases == 0) {
@@ -518,8 +438,8 @@ run_pipeline <- function(primary_cohorts) {
         meta <- as.data.frame(colData(cohort))
         keep <- meta$study_condition %in% c("control", disease)
         cohort_subset <- cohort[, keep]
-        cohort_subset <- clean_cohort(cohort_subset)
-        
+        #cohort_subset <- clean_cohort(cohort_subset)
+
         comparison_name <- paste(cohort_name, disease, sep = "_")
         
         # Run QC and log results
@@ -530,7 +450,7 @@ run_pipeline <- function(primary_cohorts) {
         
         # Perform LEfSe, log analysis status/combination and save results
         res <- run_lefser(
-          cohort,
+          cohort_subset,
           comparison = paste("control vs", disease),
           disease_label = disease
         )
@@ -558,23 +478,12 @@ run_pipeline <- function(primary_cohorts) {
 
 
 #' Export LEfSe analysis pipeline outputs as raw R objects and CSVs
-#'
-#' @param pipeline A named list containing pipeline outputs
-#'
-#' @param out_dir Character string specifying output directory 
-#' 
-#' @return Invisibly returns the updated pipeline object with additional fields:
-#' \describe{
-#'   \item{analysis_log}{Data frame of analysis status entries}
-#'   \item{qc_summary}{Data frame of QC summaries}
-#'   \item{lefser_df}{Tidy combined LEfSe results}
-#'   \item{contingency_df}{Long-format contingency table data}
 export_pipeline <- function(pipeline, out_dir) {
   
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   
   # Save full object
-  saveRDS(pipeline, file.path(out_dir, "pipeline.rds"))
+  saveRDS(pipeline, file.path(out_dir, "lefse_analysis.rds"))
   
   # Bind logs
   pipeline$analysis_log <- dplyr::bind_rows(pipeline$analysis_log)
