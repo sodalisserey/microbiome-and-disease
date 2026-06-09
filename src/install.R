@@ -23,11 +23,16 @@ bioc_packages <- c(
   # (S4 class) for matrix-like assays. doi:10.18129/B9.bioc.SummarizedExperiment. 
   # R package version 1.42.0, https://bioconductor.org/packages/SummarizedExperiment.
   
-  "lefser"
+  "lefser",
   # Khleborodova A, Gamboa-Tuz S, Ramos M, Segata N, Waldron L, Oh S (2024). 
   # “Lefser: Implementation of metagenomic biomarker discovery tool, LEfSe, in R.” 
   # Bioinformatics, btae707. ISSN 1367-4811. doi:10.1093/bioinformatics/btae707. 
   # https://academic.oup.com/bioinformatics/advance-article/doi/10.1093/bioinformatics/btae707/7908399.
+  
+  "CrcBiomeScreen"
+  # Li C, Bezbaruah R, Wood H, Gusnanto A (2026). CrcBiomeScreen: An R package for 
+  # colorectal cancer screening and microbiome analysis. doi:10.18129/B9.bioc.
+  # CrcBiomeScreen. R package version 1.0.0, https://bioconductor.org/packages/CrcBiomeScreen.
 )
 
 # Install CRAN packages
@@ -45,4 +50,4 @@ for (pkg in bioc_packages) {
 }
 
 # Load message
-cat("All packages installed successfully")
+message("All packages installed successfully")
