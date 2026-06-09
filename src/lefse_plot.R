@@ -293,7 +293,7 @@ create_and_save_plots <- function(df,
   
   write.csv(
     plot_log_df,
-    file.path(out_dir, "plot_log.csv"),
+    file.path(out_dir, "_plot_log.csv"),
     row.names = FALSE
   )
   
