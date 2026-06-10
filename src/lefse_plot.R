@@ -143,7 +143,7 @@ save_single_plot <- function(plot,
                              out_dir,
                              n_features) {
   
-  safe_comp <- gsub("[/\\\\]", "_", comparison)
+  safe_comp <- gsub("[/\\\\]", "", comparison)
   
   out_path <- file.path(
     out_dir,

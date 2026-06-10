@@ -47,6 +47,7 @@ load_cohorts <- function(cohorts) {
     })
   })
   
+  message("Loaded: ", length(cohorts), " cohorts")
   names(out) <- cohorts
   out
 }
@@ -100,6 +101,37 @@ process_conditions <- function(cohort,
   )
 }
 
+#' Check conditions contrast in cohort and print error message if no healthy or
+#' disease samples present 
+validate_conditions <- function(info, cohort_name) {
+  
+  if (!info$healthy_present || info$n_diseases == 0) {
+    
+    reason <- dplyr::case_when(
+      !info$healthy_present ~ "No healthy samples",
+      info$n_diseases == 0 ~ "Healthy samples only"
+    )
+    
+    message(reason, " in ", cohort_name, ". Skipping.")
+
+    return(reason)
+  }
+  
+  return(NULL)
+}
+
+#' Write multiple data frames to csv files
+write_csvs <- function(out_dir, data_list) {
+  for (nm in names(data_list)) {
+    write.csv(
+      data_list[[nm]],
+      file.path(out_dir, paste0(nm, ".csv")),
+      row.names = FALSE
+    )
+  }
+  message("\nDone. CSVs written to: ", file.path(out_dir))
+}
+
 
 # Read and save cohorts --------------------------------------------------------
 # primary_cohorts <- read_cohort_list("data/primary.txt")
@@ -109,3 +141,7 @@ process_conditions <- function(cohort,
 # test_cohorts <- read_cohort_list("data/test.txt")
 # saveRDS(load_cohorts(test_cohorts), "data/test_cohorts.rds")
 # test_cohorts <- readRDS("data/test_cohorts.rds")
+# 
+# no_contrast_cohorts <- read_cohort_list("data/no_contrast.txt")
+# saveRDS(load_cohorts(no_contrast_cohorts), "data/no_contrast_cohorts.rds")
+# test_cohorts <- readRDS("data/no_contrast_cohorts.rds")

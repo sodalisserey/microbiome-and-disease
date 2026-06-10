@@ -20,11 +20,10 @@ source("src/handler.R")
 
 
 # Define output directory ------------------------------------------------------
-dir.create("results", recursive = TRUE, showWarnings = FALSE)
 out_dir <- "results/lefse_analysis"
 
 
-# Load and extract data --------------------------------------------------------
+# Load data --------------------------------------------------------------------
 primary_cohorts <- readRDS("data/primary_cohorts.rds") |>
   create_cohort_objects()
 
@@ -65,11 +64,11 @@ run_qc <- function(
   class_ratio <- n_max / n_min
   
   class_imbalance <- if (class_ratio > class_imbalance_severe) {
-    "severe"
+    paste0("severe (>", class_imbalance_severe, ")")
   } else if (class_ratio > class_imbalance_high) {
-    "high"
+    paste0("high (>", class_imbalance_high, ")")
   } else if (class_ratio > class_imbalance_mid) {
-    "moderate"
+    paste0("moderate (>", class_imbalance_mid, ")")
   } else {
     "low"
   }
@@ -285,18 +284,18 @@ bind_list_to_df <- function(x, transform_fn) {
   )
 }
 
-#' Write multiple data frames to CSV files
-write_csvs <- function(out_dir, data_list) {
-  for (nm in names(data_list)) {
-    write.csv(
-      data_list[[nm]],
-      file.path(out_dir, paste0(nm, ".csv")),
-      row.names = FALSE
-    )
-  }
-  message("\nDone. CSVs written to: ", file.path(out_dir))
-}
-
+#' #' Write multiple data frames to CSV files
+#' write_csvs <- function(out_dir, data_list) {
+#'   for (nm in names(data_list)) {
+#'     write.csv(
+#'       data_list[[nm]],
+#'       file.path(out_dir, paste0(nm, ".csv")),
+#'       row.names = FALSE
+#'     )
+#'   }
+#'   message("\nDone. CSVs written to: ", file.path(out_dir))
+#' }
+# TODO erase bc moved to handler.R
 
 # Define main functions --------------------------------------------------------
 #' Run full LEfSe analysis analysis and return list of results by executing the 
@@ -332,15 +331,10 @@ run_analysis <- function(primary_cohorts) {
     cohort <- primary_cohorts[[cohort_name]]
     info <- process_conditions(cohort)
     
-    # Filter out cohorts with no control (healthy) samples
-    if (!info$healthy_present || info$n_diseases == 0) {
-      
-      reason <- dplyr::case_when(
-        !info$healthy_present ~ "No healthy samples",
-        info$n_diseases == 0 ~ "Healthy samples only"
-      )
-      
-      message(reason, " in ", cohort_name, ". Skipping.")
+    # Check cohort contains both healthy and disease samples
+    reason <- validate_conditions(info, cohort_name)
+    
+    if (!is.null(reason)) {
       
       analysis$analysis_log[[length(analysis$analysis_log) + 1]] <- data.frame(
         comparison = cohort_name,
@@ -400,7 +394,6 @@ run_analysis <- function(primary_cohorts) {
         meta <- as.data.frame(colData(cohort))
         keep <- meta$study_condition %in% c("control", disease)
         cohort_subset <- cohort[, keep]
-        #cohort_subset <- clean_cohort(cohort_subset)
 
         comparison_name <- paste(cohort_name, disease, sep = "_")
         
@@ -442,12 +435,13 @@ run_analysis <- function(primary_cohorts) {
 #' Export LEfSe analysis analysis outputs as raw R objects and CSVs
 export_analysis <- function(analysis, out_dir) {
   
+  dir.create("results", recursive = TRUE, showWarnings = FALSE)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   
   # Save full object
   saveRDS(analysis, file.path(out_dir, "lefse_analysis.rds"))
   
-  # Bind logs
+  # Bind data frames
   analysis$analysis_log <- dplyr::bind_rows(analysis$analysis_log)
   analysis$qc_summary <- dplyr::bind_rows(analysis$qc_summary)
   
