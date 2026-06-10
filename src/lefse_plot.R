@@ -28,7 +28,8 @@ extract_species <- function(df) {
       ),
       species = sub("\\|.*", "", species),
       species = sub("^[a-z]__", "", species),
-      species = gsub("_", " ", species)
+      species = gsub("_", " ", species),
+      species = sub("^species:", "", species)
     )
 }
 
