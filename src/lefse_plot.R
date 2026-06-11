@@ -20,13 +20,12 @@ extract_species <- function(df) {
         stringr::str_detect(features, "s__") ~ sub(".*s__", "s__", features),
         stringr::str_detect(features, "g__") ~ sub(".*g__", "g__", features),
         stringr::str_detect(features, "f__") ~ sub(".*f__", "f__", features),
-        TRUE ~ features
-      ),
+        TRUE ~ features),
+      
       species = sub("\\|.*", "", species),
       species = sub("^[a-z]__", "", species),
       species = gsub("_", " ", species),
-      species = sub("^species:", "", species)
-    )
+      species = sub("^species:", "", species))
 }
 
 #' Convert disease label string with underscores to title case
@@ -38,8 +37,7 @@ smart_case <- function(x) {
   words <- ifelse(
     words == toupper(words),
     words,
-    stringr::str_to_title(tolower(words))
-  )
+    stringr::str_to_title(tolower(words)))
   
   paste(words, collapse = " ")
 }
@@ -56,19 +54,17 @@ process_scores <- function(df_sub,
     dplyr::slice_max(
       order_by = abs(scores),
       n = max_features,
-      with_ties = FALSE
-    ) %>%
+      with_ties = FALSE) %>%
+    
     dplyr::mutate(
       group_label = ifelse(
         scores > 0,
         disease_label,
-        healthy_label
-      ),
+        healthy_label),
+      
       group_label = factor(
         group_label,
-        levels = c(healthy_label, disease_label)
-      )
-    )
+        levels = c(healthy_label, disease_label)))
 }
 
 #' Build a LEfSe bar plot using ggplot2
@@ -81,44 +77,43 @@ create_plot <- function(df_sub,
     ggplot2::aes(
       x = scores,
       y = stats::reorder(species, scores, FUN = mean),
-      fill = group_label
-    )
-  ) +
+      fill = group_label)) +
+    
     ggplot2::geom_col(
       width = 0.7,
       colour = "white",
-      linewidth = 0.2
-    ) +
+      linewidth = 0.2) +
+    
     ggplot2::geom_vline(
       xintercept = 0,
       linewidth = 0.4,
-      colour = "grey40"
-    ) +
+      colour = "grey40") +
+    
     ggplot2::scale_fill_manual(
       values = c(
         setNames("steelblue", healthy_label),
-        setNames("firebrick", disease_label)
-      ),
-      name = "Enriched in"
-    ) +
+        setNames("firebrick", disease_label)),
+      
+      name = "Enriched in") +
+    
     ggplot2::scale_x_continuous(
-      expand = ggplot2::expansion(mult = c(0.05, 0.05))
-    ) +
+      expand = ggplot2::expansion(mult = c(0.05, 0.05))) +
+    
     ggplot2::theme_minimal(base_size = 11) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(
         face = "bold",
         size = 12,
-        hjust = 0.5
-      ),
+        hjust = 0.5),
+      
       axis.text.y = ggplot2::element_text(
         size = 8,
-        face = "italic"
-      ),
+        face = "italic"),
+      
       legend.position = "bottom",
       panel.grid.major.y = ggplot2::element_blank(),
-      panel.grid.minor = ggplot2::element_blank()
-    ) +
+      panel.grid.minor = ggplot2::element_blank()) +
+    
     ggplot2::labs(
       title = paste0(
         cohort_name,
@@ -129,8 +124,7 @@ create_plot <- function(df_sub,
         ")"
       ),
       x = "LDA score (log10)",
-      y = NULL
-    )
+      y = NULL)
 }
 
 #' Save a single plot as a pdf
@@ -143,8 +137,7 @@ save_plot <- function(plot,
   
   out_path <- file.path(
     out_dir,
-    paste0(safe_comp, ".pdf")
-  )
+    paste0(safe_comp, ".pdf"))
   
   plot_height <- max(4, n_features * 0.35 + 1.5)
   
@@ -153,8 +146,7 @@ save_plot <- function(plot,
     plot = plot,
     width = 9,
     height = plot_height,
-    device = "pdf"
-  )
+    device = "pdf")
   
   invisible(out_path)
 }
@@ -173,8 +165,7 @@ log_plots <- function(df_sub,
       plotted_features = plotted_features,
       status = status,
       reason = reason,
-      stringsAsFactors = FALSE
-    )
+      stringsAsFactors = FALSE)
   }
   
   n_features_raw <- nrow(df_sub)
@@ -234,18 +225,15 @@ export_plots <- function(df,
         comparison = comp,
         out_dir = out_dir,
         min_features = min_features,
-        max_features = max_features
-      )
-    }
-  )
+        max_features = max_features)
+    })
   
   plot_log_df <- dplyr::bind_rows(plot_log)
   
   write.csv(
     plot_log_df,
     file.path(out_dir, "_plot_log.csv"),
-    row.names = FALSE
-  )
+    row.names = FALSE)
   message("Done. Plots written to: ", out_dir)
   
   invisible(plot_log_df)
