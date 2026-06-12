@@ -3,22 +3,23 @@
 # 2. Load data using utils.R
 # 3. Execute main functions:
 #   a. run_training()
-#     * 
+#     * Clean, extract disease and validate conditions
 #     * TRAINING BRANCH 1 (healthy x 1 disease) -> run_pipeline() executes:
-#           - run_qc()
-#           - create_model()
+#           - run_qc() 
+#           - run_partition()
+#           - create_model() if n_training_status == "OK"
 #           - log_qc()
 #           - log_training()
 #           - log_result()
 #     * TRAINING BRANCH 2 (healthy x >1 disease)  -> 
 #           - Create pair-wise subsets
 #           - Execute run_pipeline()
-#   b. export_models()
+#   b. export_training()
 #     * Bulk save analysis results into:
-#           - qc_summary.csv
-#           - training_log.csv
-#           - models/[comparison]_RF.rds
-#           - all_models.rds
+#           - results/ml_training/qc_summary.csv
+#           - results/ml_training/training_log.csv
+#           - results/ml_training/models/[comparison]_RF.rds
+#           - results/ml_training/all_models.rds
 
 
 # Load packages and dependencies -----------------------------------------------
@@ -34,12 +35,12 @@ out_dir <- "results/ml_training"
 #' Prepare cohort by creating CrcBiomeScreenObject, splitting/setting taxa, 
 #' normalising data, filtering study_condition, running QC, splitting dataset 
 #' into training/testing and checking class balance
-run_qc <- function(cohort,
-                   comparison_name,
-                   disease,
-                   out_dir,
-                   norm_method = "GMPR",
-                   partition_ratio = 0.7) {
+run_qc <- function(
+    cohort,
+    comparison_name,
+    disease,
+    out_dir,
+    norm_method = "GMPR") {
   
   warnings <- character()
   
@@ -67,27 +68,12 @@ run_qc <- function(cohort,
       
       # Perform QC
       suppressMessages(
-        obj_qc <- qcByCmdscale(
+        obj <- qcByCmdscale(
           obj,
           TaskName = paste0(comparison_name, "_QC"),
           outdir = out_dir,
           normalize_method = norm_method,
           plot = TRUE))
-      
-      # Split cohort into training and testing sets
-      obj <- SplitDataSet(
-        obj_qc,
-        label = c("control", disease),
-        partition = partition_ratio)
-      
-      # Check class balance in training subset
-      suppressMessages(
-        balance <- checkClassBalance(
-          getModelData(obj)$TrainLabel, 
-          outdir = out_dir, 
-          plot = FALSE))
-      
-      class_counts <- table(balance$class_counts)
       
     },
     warning = function(w) {
@@ -102,23 +88,83 @@ run_qc <- function(cohort,
     norm_method = norm_method,
     warnings = if (length(warnings) == 0) NA_character_ else
       paste(warnings, collapse = " | "),
+    
     n_features = ncol(obj@OrginalNormalizedData),
     n_samples = nrow(obj@OrginalNormalizedData),
-    outliers = obj_qc@OutlierSamples,
+    
+    outliers = obj@OutlierSamples,
     n_features_qc = ncol(obj@NormalizedData),
-    n_samples_qc = nrow(obj@NormalizedData),
-    partition_ratio = partition_ratio,
-    cl_ratio_training = max(balance$class_counts) / min(balance$class_counts),
-    cl_imbalance_training = balance$is_imbalanced,
-    n_controls_training = (balance$class_counts[["control"]] %||% 0),
-    n_conditions_training = (balance$class_counts[[disease]] %||% 0)))
+    n_samples_qc = nrow(obj@NormalizedData)))
+}
+
+#' Split a prepped cohort into training and testing datasets and return results
+run_partition <- function(
+    prep,
+    partition_ratio = 0.7,
+    n_threshold = 20,
+    out_dir) {
+  
+  disease <- prep$disease
+
+  # Partition into datasets
+  obj <- SplitDataSet(
+    prep$obj,
+    label = c("control", disease),
+    partition = partition_ratio)
+  
+  # Check class balance in training subset
+  suppressMessages(
+    balance <- checkClassBalance(
+      getModelData(obj)$TrainLabel, 
+      outdir = out_dir, 
+      plot = FALSE))
+  
+  # Get counts from training subset
+  class_counts <- table(balance$class_counts)
+  
+  n_controls_training = (balance$class_counts[["control"]] %||% 0)
+  n_disease_training = (balance$class_counts[[disease]] %||% 0)
+  
+  n_status_training <- character()
+  
+  if (n_controls_training < n_threshold) {
+    n_status_training <- c(n_status_training, paste0("controls < ", n_threshold))
+  }
+  
+  if (n_disease_training < n_threshold) {
+    n_status_training <- c(n_status_training, paste0(disease, " < ", n_threshold))
+  }
+  
+  n_status_training <- if (length(n_status_training) == 0) {
+    "OK"
+  } else {
+    paste(n_status_training, collapse = " | ")
+  }     
+  
+  prep$obj <- obj
+  
+  prep$partition_ratio <- partition_ratio
+  prep$n_threshold <- n_threshold
+  
+  prep$cl_ratio_training <- max(balance$class_counts)/min(balance$class_counts)
+  
+  prep$cl_imbalance_training <- balance$is_imbalanced
+  
+  prep$n_controls_training <- n_controls_training
+  
+  prep$n_disease_training <- n_disease_training
+  
+  prep$n_status_training <- n_status_training
+  
+  prep
 }
 
 #' Create an ML model based on the training subset of a cohort
-create_model <- function(prep,
-                        disease,
-                        comparison,
-                        out_dir) {
+create_model <- function(
+    prep,
+    disease,
+    comparison,
+    out_dir) {
   
   safe_comp <- gsub("[/\\\\]", "", comparison)
   
@@ -146,6 +192,9 @@ create_model <- function(prep,
           TaskName = paste0(safe_comp, "_RF"),
           ClassWeights = class_weights,
           TrueLabel = disease,
+          # TODO change values
+          # num_cores = 5,
+          # n_cv = 10)
           num_cores = 1,
           n_cv = 2)
         
@@ -185,10 +234,11 @@ create_model <- function(prep,
 #' Log QC results from a single comparison containing number of features and 
 #' samples before and after QC, outliers and training dataset class balance,
 #' then append training_res$qc_summary and return training_res
-log_qc <- function(comparison_name, 
-                   cohort_name,
-                   prep,
-                   training_res) {
+log_qc <- function(
+    comparison_name, 
+    cohort_name,
+    prep,
+    training_res) {
   
   # initialise container if missing
   if (is.null(training_res$qc_summary)) {
@@ -220,7 +270,9 @@ log_qc <- function(comparison_name,
     cl_ratio_training = prep$cl_ratio_training,
     cl_imbalance_training = prep$cl_imbalance_training,
     n_controls_training = prep$n_controls_training,
-    n_conditions_training = prep$n_conditions_training,
+    n_disease_training = prep$n_disease_training,
+    n_status_training = prep$n_status_training,
+    n_threshold = prep$n_threshold,
     
     stringsAsFactors = FALSE)
   
@@ -231,28 +283,28 @@ log_qc <- function(comparison_name,
 
 #' Log model training status for a single comparison, append 
 #' training_res$training_log and return training_res
-log_training <- function(comparison_name, 
-                         cohort_name, 
-                         disease, 
-                         seed = NULL,
-                         status = NULL,
-                         reason = NULL,
-                         model,
-                         training_res) {
+log_training <- function(
+    comparison_name, 
+    cohort_name, 
+    disease, 
+    status = NULL,
+    reason = NULL,
+    model,
+    training_res) {
   
   # Initialise container if missing
   if (is.null(training_res$training_log)) {
     training_res$training_log <- list()
   }
   
-  create_log <- function(status, reason) {
+  create_log <- function(status, reason, AUC = NA_real_) {
     data.frame(
       comparison = comparison_name,
       cohort = cohort_name,
       disease = disease,
-      seed = seed,
       status = status,
       reason = reason,
+      internal_AUC = AUC,
       error = if (length(model$error) == 0) NA_character_ else 
         paste(model$error, collapse = "| "),
       warnings = if (length(model$warnings) == 0) NA_character_ else
@@ -265,29 +317,39 @@ log_training <- function(comparison_name,
   # Case 1: explicit SKIPPED when condition_invalid == TRUE
   if (!is.null(status) && status == "SKIPPED") {
     training_res$training_log[[comparison_name]] <-
-      create_log("SKIPPED", reason)
+      create_log("SKIPPED", reason, NA_real_)
     return(training_res)
   }
   
   # Case 2: null result
-  if (is.null(model)) {
+  # TODO this is not triggered when models aren't created. try with model$rf_model?
+  if (is.null(model) || is.null(model$rf_model)) {
     training_res$training_log[[comparison_name]] <-
-      create_log("FAILED", "training returned NULL")
+      create_log("FAILED", "training returned NULL", NA_real_)
     return(training_res)
-  }
   
   # Case 3: success
-  training_res$training_log[[comparison_name]] <-
-    create_log("SUCCESS", NA_character_)
+  } else {
+    AUC <- tryCatch(
+      as.numeric(sub(".*: ", "", model$rf_model@EvaluateResult$RF$AUC)),
+      error = function(e) NA_real_
+    )
+    
+    message(paste0("AUC = ", AUC))
+    
+    training_res$training_log[[comparison_name]] <-
+      create_log("SUCCESS", NA_character_, AUC)
+  }
   
   return(training_res)
 }
 
 #' Log model from a single training, append training_res$all_models and return 
 #' training_res
-log_result <- function(comparison_name, 
-                       model,
-                       training_res){
+log_result <- function(
+    comparison_name, 
+    model,
+    training_res){
   
   # initialise container if missing
   if (is.null(training_res$all_models)) {
@@ -303,12 +365,12 @@ log_result <- function(comparison_name,
 
 #' Run training pipeline which includes preprocessing and QC checks, RF modellng
 #' and logging
-run_pipeline <- function(cohort,
-                         cohort_name,
-                         comparison_name,
-                         disease,
-                         seed,
-                         training_res){
+run_pipeline <- function(
+    cohort,
+    cohort_name,
+    comparison_name,
+    disease,
+    training_res){
   
   # Prepare cohort for training and log QC results
   prep <- run_qc(
@@ -317,12 +379,36 @@ run_pipeline <- function(cohort,
     disease = disease,
     out_dir = out_dir)
   
+  prep <- run_partition(
+    prep = prep,
+    out_dir = out_dir)
+  
   training_res <- log_qc(
     comparison_name, 
     cohort_name = cohort_name,
     prep = prep,
     training_res = training_res)
   
+  message(paste0("N training samples = ", prep$n_status_training))
+  
+  # Skip training if n_sample too small
+  if (prep$n_status_training != "OK") {
+    
+    training_res <- log_training(
+      comparison_name,
+      cohort_name = cohort_name,
+      disease = disease,
+      status = "SKIPPED",
+      reason = prep$n_status_training,
+      model = list(
+        error = NA_character_,
+        warnings = NA_character_,
+        class_weights = NA),
+      training_res = training_res)
+    
+    return(training_res)
+  }
+    
   # Train model on cohort, log training info/status and save results
   model <- create_model(
     prep,
@@ -334,7 +420,6 @@ run_pipeline <- function(cohort,
     comparison_name, 
     cohort_name = cohort_name, 
     disease = disease, 
-    seed = seed,
     model = model,
     training_res = training_res) 
   
@@ -347,20 +432,9 @@ run_pipeline <- function(cohort,
 }
 
 
-# Load data --------------------------------------------------------------------
-# primary_cohorts <- readRDS("data/primary_cohorts.rds") |>
-#   create_cohort_objects()
-
-test_cohorts <- readRDS("data/test_cohorts.rds") |>
-  create_cohort_objects()
-
-# no_contrast_cohorts <- readRDS("data/no_contrast_cohorts.rds") |>
-#   create_cohort_objects()
-
-
-# Define main function ---------------------------------------------------------
+# Define main functions --------------------------------------------------------
 #' Run main ML modelling loop for two training branches
-run_training <- function(cohort_list, out_dir, seed) {
+run_training <- function(cohort_list, out_dir) {
   
   dir.create("results", recursive = TRUE, showWarnings = FALSE)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -400,7 +474,6 @@ run_training <- function(cohort_list, out_dir, seed) {
         cohort = cohort,
         cohort_name = cohort_name,
         disease = disease,
-        seed = seed,
         comparison_name = comparison_name,
         training_res = training_res)
       
@@ -422,7 +495,6 @@ run_training <- function(cohort_list, out_dir, seed) {
           cohort = cohort_subset,
           cohort_name = cohort_name,
           disease = disease,
-          seed = seed,
           comparison_name = comparison_name,
           training_res = training_res)
       }
@@ -432,7 +504,7 @@ run_training <- function(cohort_list, out_dir, seed) {
 }
 
 #' Export training outputs as raw R objects and CSVs
-export_models <- function(training_res, out_dir) {
+export_training <- function(training_res, out_dir) {
   
   dir.create("results", recursive = TRUE, showWarnings = FALSE)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -453,9 +525,14 @@ export_models <- function(training_res, out_dir) {
 }
 
 
-# Execute ----------------------------------------------------------------------
-seed <- 1234
-set.seed(seed)
+# Load data --------------------------------------------------------------------
+# primary_cohorts <- readRDS("data/primary_cohorts.rds") |>
+#   create_cohort_objects()
 
-training_res <- run_training(test_cohorts, out_dir, seed)
-export_models(training_res, out_dir)
+test_cohorts <- readRDS("data/test_cohorts.rds") |>
+  create_cohort_objects()
+
+
+# Execute ----------------------------------------------------------------------
+training_res <- run_training(test_cohorts, out_dir)
+export_training(training_res, out_dir)
