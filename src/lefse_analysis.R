@@ -5,8 +5,8 @@
 #   a. run_analysis()
 #     * Clean, extract disease and validate conditions
 #     * ANALYSIS BRANCH 1 (healthy x 1 disease) -> run_pipeline() executes:
-#           - run_qc()
-#           - run_lefser()
+#           - run_qc() - contingency table, class and age balance, sample size
+#           - run_lefser() 
 #           - log_qc()
 #           - log_analysis()
 #           - log_result()
@@ -44,7 +44,8 @@ run_qc <- function(cohort,
                    class_imbalance_mid = 2,
                    class_imbalance_high = 5,
                    class_imbalance_severe = 10,
-                   age_imbalance_thresh = 0.25) {
+                   age_imbalance_thresh = 0.25,
+                   n_status_thresh = 5) {
   
   meta <- as.data.frame(colData(cohort))
   
@@ -112,14 +113,36 @@ run_qc <- function(cohort,
   
   # Get counts
   counts <- as.list(table(meta[[condition_col]]))
+  counts <- as.list(table(meta[[condition_col]]))
+  
+  n_controls <- counts[["control"]] %||% 0
+  n_conditions <- counts[[disease]] %||% 0
+  
+  n_status <- character()
+  
+  if (n_controls < n_status_thresh) {
+    n_status <- c(n_status, paste0("n controls < ", n_status_thresh))
+  }
+  
+  if (n_conditions < 5) {
+    n_status <- c(n_status, paste0("n ", disease, " < ", n_status_thresh))
+  }
+  
+  n_status <- if (length(n_status) == 0) {
+    NA_character_
+  } else {
+    paste(n_status, collapse = " | ")
+  }
+  
   
   # Return results
   result <- list(
     contingency_table = contingency_df,
     class_balance = class_balance,
     age_balance = age_balance,
-    n_controls = counts[["control"]] %||% 0,
-    n_conditions = counts[[disease]] %||% 0)
+    n_controls = n_controls,
+    n_conditions = n_conditions,
+    n_status = n_status)
   
   return(result)
 }
@@ -234,6 +257,7 @@ log_qc <- function(comparison_name,
     
     n_controls = qc$n_controls,
     n_conditions = qc$n_conditions,
+    n_status = qc$n_status,
     
     stringsAsFactors = FALSE)
   
