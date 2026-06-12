@@ -1,4 +1,13 @@
-# Import LEfSe results from csv, generate and save plots for all comparisons
+# Import LEfSe results from csv, generate and save plots
+# 1. Define input/output directories and functions
+# 2. Load LEfSe data from csv
+# 3. Execute export_plots() which runs:
+#     * extract_species()
+#     * log_plot(), which executes smart_case() and process_scores()
+#     * create_plot()
+#     * save_plot()
+#    And saves plots as [comparison].pdf into results/lefse_analysis/plots
+
 
 # Load packages ----------------------------------------------------------------
 library(ggplot2)
@@ -43,12 +52,13 @@ smart_case <- function(x) {
 }
 
 #' Prepare LEfSe plot data by filtering scores and assigning healthy/disease label
-process_scores <- function(df_sub,
-                          disease_label,
-                          healthy_label,
-                          max_features) {
+process_scores <- function(
+    lefse_res_df,
+    disease_label,
+    healthy_label,
+    max_features) {
   
-  df_sub %>%
+  lefse_res_df %>%
     dplyr::mutate(scores = as.numeric(scores)) %>%
     dplyr::filter(!is.na(scores)) %>%
     dplyr::slice_max(
@@ -67,13 +77,96 @@ process_scores <- function(df_sub,
         levels = c(healthy_label, disease_label)))
 }
 
+#' Log plotting status and number of features
+log_plot <- function(
+    lefse_res_df,
+    comparison,
+    min_features = 3,
+    max_features = 30) {
+  
+  create_log <- function(
+    comp,
+    n_features,
+    plotted_features = NA,
+    status,
+    reason = NA,
+    df_plot = NULL) {
+    
+    list(
+      log = data.frame(
+        comparison = comp,
+        n_features = n_features,
+        plotted_features = plotted_features,
+        status = status,
+        reason = reason,
+        stringsAsFactors = FALSE
+      ),
+      df_plot = df_plot
+    )
+  }
+  
+  n_features_raw <- nrow(lefse_res_df)
+  
+  # Case 1: no data
+  if (n_features_raw == 0) {
+    return(create_log(comparison, 0, NA, "SKIPPED", "No data"))
+  }
+  
+  disease_label <- smart_case(unique(lefse_res_df$disease)[1])
+  healthy_label <- "Healthy"
+  
+  # Case 2: too few features
+  if (n_features_raw < min_features) {
+    return(create_log(
+      comparison,
+      n_features_raw,
+      NA,
+      "SKIPPED",
+      "Too few features"
+    ))
+  }
+  
+  # Process and filter scores for plotting
+  df_plot <- process_scores(
+    lefse_res_df,
+    disease_label,
+    healthy_label,
+    max_features
+  )
+  
+  n_features <- nrow(df_plot)
+  
+  # Case 3: no valid scores after processing
+  if (n_features == 0) {
+    return(create_log(
+      comparison,
+      n_features_raw,
+      0,
+      "SKIPPED",
+      "No valid scores"
+    ))
+  }
+  
+  # Case 4: set status as "READY" for plotting
+  create_log(
+    comparison,
+    n_features_raw,
+    n_features,
+    "READY",
+    NA,
+    df_plot = df_plot
+  )
+}
+
 #' Build a LEfSe bar plot using ggplot2
-create_plot <- function(df_sub,
-                               cohort_name,
-                               disease_label,
-                               healthy_label) {
+create_plot <- function(
+    lefse_res_df,
+    cohort_name,
+    disease_label,
+    healthy_label) {
+  
   ggplot2::ggplot(
-    df_sub,
+    lefse_res_df,
     ggplot2::aes(
       x = scores,
       y = stats::reorder(species, scores, FUN = mean),
@@ -128,10 +221,11 @@ create_plot <- function(df_sub,
 }
 
 #' Save a single plot as a pdf
-save_plot <- function(plot,
-                             comparison,
-                             out_dir,
-                             n_features) {
+save_plot <- function(
+    plot,
+    comparison,
+    out_dir,
+    n_features) {
   
   safe_comp <- gsub("[/\\\\]", "", comparison)
   
@@ -151,82 +245,61 @@ save_plot <- function(plot,
   invisible(out_path)
 }
 
-#' Log plot features and status
-log_plots <- function(df_sub,
-                      comparison,
-                      out_dir,
-                      min_features = 3,
-                      max_features = 30) {
-  
-  create_log <- function(comp, n_features, plotted_features = NA, status, reason = NA) {
-    data.frame(
-      comparison = comp,
-      n_features = n_features,
-      plotted_features = plotted_features,
-      status = status,
-      reason = reason,
-      stringsAsFactors = FALSE)
-  }
-  
-  n_features_raw <- nrow(df_sub)
-  
-  # Case 1: no data
-  if (n_features_raw == 0) {
-    return(create_log(comparison, 0, NA, "SKIPPED", "No data"))
-  }
-  
-  # Extract cohort and disease info
-  cohort_name <- unique(df_sub$cohort)[1]
-  disease_label <- smart_case(unique(df_sub$disease)[1])
-  healthy_label <- "Healthy"
-  
-  # Case 2: too few features
-  if (n_features_raw < min_features) {
-    return(create_log(comparison, n_features_raw, NA, "SKIPPED", "Too few features"))
-  }
-  
-  # Process and filter scores for plotting
-  df_plot <- process_scores(df_sub, disease_label, healthy_label, max_features)
-  n_features <- nrow(df_plot)
-  
-  # Case 3: no valid scores after processing
-  if (n_features == 0) {
-    return(create_log(comparison, n_features_raw, 0, "SKIPPED", "No valid scores"))
-  }
-  
-  # Case 4: create and save plot
-  p <- create_plot(df_plot, cohort_name, disease_label, healthy_label)
-  save_plot(p, comparison, out_dir, n_features)
-  
-  create_log(comparison, n_features_raw, n_features, "PLOTTED", NA)
-}
-
 
 # Define main function ---------------------------------------------------------
 #' Generate, export and log all LEfSe plots
-export_plots <- function(df,
-                              out_dir,
-                              min_features = 3,
-                              max_features = 30) {
+export_plots <- function(
+    lefse_res,
+    out_dir,
+    min_features = 3,
+    max_features = 30) {
   
   dir.create(file.path(out_dir), recursive = TRUE,
              showWarnings = FALSE)
   
-  df <- extract_species(df)
+  lefse_res <- extract_species(lefse_res)
   
   plot_log <- lapply(
-    unique(df$comparison),
+    unique(lefse_res$comparison),
     function(comp) {
       
-      df_sub <- dplyr::filter(df, comparison == comp)
+      lefse_res_df <- dplyr::filter(
+        lefse_res,
+        comparison == comp
+      )
       
-      log_plots(
-        df_sub = df_sub,
+      res <- log_plot(
+        lefse_res_df = lefse_res_df,
         comparison = comp,
-        out_dir = out_dir,
         min_features = min_features,
-        max_features = max_features)
-    })
+        max_features = max_features
+      )
+      
+      if (res$log$status == "READY") {
+        
+        cohort_name <- unique(lefse_res_df$cohort)[1]
+        disease_label <- smart_case(unique(lefse_res_df$disease)[1])
+        
+        p <- create_plot(
+          res$df_plot,
+          cohort_name,
+          disease_label,
+          "Healthy"
+        )
+        
+        save_plot(
+          p,
+          comp,
+          out_dir,
+          nrow(res$df_plot)
+        )
+        
+        res$log$status <- "PLOTTED"
+      }
+      
+      res$log
+    }
+  )
   
   plot_log_df <- dplyr::bind_rows(plot_log)
   
@@ -241,8 +314,8 @@ export_plots <- function(df,
 
 
 # Load data --------------------------------------------------------------------
-df <- read.csv(file.path(in_dir, "lefse_results.csv"), stringsAsFactors = FALSE)
+lefse_res <- read.csv(file.path(in_dir, "lefse_results.csv"), stringsAsFactors = FALSE)
 
 
 # Execute ----------------------------------------------------------------------
-export_plots(df, out_dir)
+export_plots(lefse_res, out_dir)

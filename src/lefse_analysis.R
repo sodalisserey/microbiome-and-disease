@@ -5,7 +5,7 @@
 #   a. run_analysis()
 #     * Clean, extract disease and validate conditions
 #     * ANALYSIS BRANCH 1 (healthy x 1 disease) -> run_pipeline() executes:
-#           - run_qc() - contingency table, class and age balance, sample size
+#           - run_qc() 
 #           - run_lefser() 
 #           - log_qc()
 #           - log_analysis()
@@ -15,11 +15,11 @@
 #           - Execute run_pipeline()
 #   b. export_analysis()
 #     * Bulk save analysis results into:
-#           - qc_summary.csv
-#           - contingency_tables.csv
-#           - analysis_log.csv
-#           - lefse_results.csv
-#           - lefse_results.rds
+#           - results/lefse_analysis/qc_summary.csv
+#           - results/lefse_analysis/contingency_tables.csv
+#           - results/lefse_analysis/analysis_log.csv
+#           - results/lefse_analysis/lefse_results.csv
+#           - results/lefse_analysis/lefse_results.rds
 
 
 # Load packages and dependencies -----------------------------------------------
@@ -36,16 +36,17 @@ out_dir <- "results/lefse_analysis"
 # Define helper functions ------------------------------------------------------
 #' Run QC on a cohort and return a contingency table, class imbalance and 
 #' age imbalance ratios and counts
-run_qc <- function(cohort,
-                   cohort_name,
-                   disease,
-                   age_col = "age_category",
-                   condition_col = "study_condition",
-                   class_imbalance_mid = 2,
-                   class_imbalance_high = 5,
-                   class_imbalance_severe = 10,
-                   age_imbalance_thresh = 0.25,
-                   n_status_thresh = 5) {
+run_qc <- function(
+    cohort,
+    cohort_name,
+    disease,
+    age_col = "age_category",
+    condition_col = "study_condition",
+    class_imbalance_mid = 2,
+    class_imbalance_high = 5,
+    class_imbalance_severe = 10,
+    age_imbalance_thresh = 0.25,
+    n_status_thresh = 5) {
   
   meta <- as.data.frame(colData(cohort))
   
@@ -155,12 +156,13 @@ run_qc <- function(cohort,
 #'    * at least 2 age groups are present
 #'    * all age groups contain both healthy and disease samples
 #' - LEfSe differential abundance analysis
-run_lefser <- function(cohort,
-                       comparison = NULL,
-                       subclassCol = "age_category",
-                       disease_label = NULL,
-                       control_label = "control",
-                       seed = 1234) {
+run_lefser <- function(
+    cohort,
+    comparison = NULL,
+    subclassCol = "age_category",
+    disease_label = NULL,
+    control_label = "control",
+    seed = 1234) {
   
   meta <- as.data.frame(colData(cohort))
   
@@ -229,11 +231,12 @@ run_lefser <- function(cohort,
 #' Log QC results from a single comparison including contingency table, class 
 #' ratio, class imbalance, age ratio, age imbalance and condition counts, append
 #' analysis_res$qc_summary and return analysis_res
-log_qc <- function(comparison_name, 
-                   cohort_name, 
-                   disease, 
-                   qc, 
-                   analysis_res) {
+log_qc <- function(
+    comparison_name, 
+    cohort_name, 
+    disease, 
+    qc, 
+    analysis_res) {
   
   # initialise containers if missing
   if (is.null(analysis_res$qc_summary)) {
@@ -271,13 +274,14 @@ log_qc <- function(comparison_name,
 
 #' Log LEfSe analysis status for a single comparison, append 
 #' analysis_res$analysis_log and return analysis_res
-log_analysis <- function(comparison_name, 
-                       cohort_name, 
-                       disease, 
-                       status = NULL,
-                       reason = NULL,
-                       result, 
-                       analysis_res) {
+log_analysis <- function(
+    comparison_name, 
+    cohort_name, 
+    disease, 
+    status = NULL,
+    reason = NULL,
+    result, 
+    analysis_res) {
   
   # initialise container if missing
   if (is.null(analysis_res$analysis_log)) {
@@ -328,11 +332,12 @@ log_analysis <- function(comparison_name,
 
 #' Log LEfSe result from a single analysis, append analysis_res$lefse_results
 #' and return analysis_res
-log_result <- function(comparison_name, 
-                       cohort_name, 
-                       disease, 
-                       result, 
-                       analysis_res) {
+log_result <- function(
+    comparison_name, 
+    cohort_name, 
+    disease, 
+    result, 
+    analysis_res) {
   
   # initialise container if missing
   if (is.null(analysis_res$lefse_results)) {
@@ -369,11 +374,13 @@ log_result <- function(comparison_name,
 }
 
 #' Run analysis pipeline which includes QC checks, LEfSe analysis and logging
-run_pipeline <- function(cohort,
-                         cohort_name,
-                         comparison_name,
-                         disease,
-                         analysis_res) {
+run_pipeline <- function(
+    cohort,
+    cohort_name,
+    comparison_name,
+    disease,
+    analysis_res) {
+  
   # Run and log QC
   qc <- run_qc(
     cohort,
