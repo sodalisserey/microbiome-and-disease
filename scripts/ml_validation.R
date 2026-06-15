@@ -3,7 +3,7 @@
 
 # Load packages and dependencies -----------------------------------------------
 library(CrcBiomeScreen)
-source("src/utils.R")
+source("R/utils.R")
 
 
 # Define input/output directories ----------------------------------------------
@@ -15,7 +15,7 @@ out_dir <- "results/ml_validation"
 
 # TODO do these need to be separate functions? or move to utils.R
 #'
-log_qc <- fucntion(){}
+log_qc <- function(){}
 
 #'
 log_validation <- function(){}

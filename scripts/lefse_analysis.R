@@ -26,7 +26,7 @@
 library(rlang)
 library(curatedMetagenomicData)
 library(lefser)
-source("src/utils.R")
+source("R/utils.R")
 
 
 # Define output directory ------------------------------------------------------

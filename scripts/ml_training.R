@@ -24,7 +24,7 @@
 
 # Load packages and dependencies -----------------------------------------------
 library(CrcBiomeScreen)
-source("src/utils.R")
+source("R/utils.R")
 
 
 # Define output directory ------------------------------------------------------
@@ -453,7 +453,7 @@ run_training <- function(cohort_list, out_dir) {
     
     if (!is.null(condition_invalid)) {
       training_res <- log_training(
-        comparison_name,
+        comparison_name = NA_character_,
         cohort_name,
         disease = NA_character_,
         status = "SKIPPED",
