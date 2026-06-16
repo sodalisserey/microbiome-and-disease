@@ -24,6 +24,7 @@
 
 # Load packages and dependencies -----------------------------------------------
 library(CrcBiomeScreen)
+library(xgboost)
 source("R/utils.R")
 
 
@@ -37,10 +38,13 @@ out_dir <- "results/ml_training"
 #' into training/testing and checking class balance
 run_qc <- function(
     cohort,
-    comparison_name,
+    comparison,
     disease,
     out_dir,
     norm_method = "GMPR") {
+  
+  qc_dir <- file.path(out_dir, "qc")
+  dir.create(qc_dir, recursive = TRUE, showWarnings = FALSE)
   
   warnings <- character()
   
@@ -60,6 +64,10 @@ run_qc <- function(
       # Normalise data
       obj <- NormalizeData(obj, method = "GMPR", level = "Genus")
       
+      # Clean disease label in metadata and qc obj
+      obj@SampleData$study_condition <- clean_label(obj@SampleData$study_condition)
+      disease <- clean_label(disease)
+      
       # Filter for control and disease
       obj <- FilterDataSet(
         obj,
@@ -70,10 +78,15 @@ run_qc <- function(
       suppressMessages(
         obj <- qcByCmdscale(
           obj,
-          TaskName = paste0(comparison_name, "_QC"),
-          outdir = out_dir,
+          TaskName = paste0(comparison, "_QC"),
+          outdir = qc_dir,
           normalize_method = norm_method,
-          plot = TRUE))
+          # plot = TRUE))
+          plot = FALSE))
+      
+      # file.rename(
+      #   file.path(qc_dir, paste0("cmdscale_", comparison, "_QC_", norm_method, ".pdf")),
+      #   file.path(qc_dir, paste0(comparison, "_QC_", norm_method, ".pdf")))
       
     },
     warning = function(w) {
@@ -83,7 +96,7 @@ run_qc <- function(
   
   return(list(
     obj = obj,
-    comparison = comparison_name,
+    comparison = comparison,
     disease = disease,
     norm_method = norm_method,
     warnings = if (length(warnings) == 0) NA_character_ else
@@ -122,8 +135,10 @@ run_partition <- function(
   # Get counts from training subset
   class_counts <- table(balance$class_counts)
   
-  n_controls_training = (balance$class_counts[["control"]] %||% 0)
-  n_disease_training = (balance$class_counts[[disease]] %||% 0)
+  n_controls_training <- if (
+    !is.null(balance$class_counts[["control"]])) balance$class_counts[["control"]] else 0
+  n_disease_training  <- if (
+    !is.null(balance$class_counts[[disease]])) balance$class_counts[[disease]] else 0
   
   n_status_training <- character()
   
@@ -167,17 +182,15 @@ create_model <- function(
     out_dir,
     cfg) {
   
-  safe_comp <- gsub("[/\\\\]", "", comparison)
-  
   model_dir <- file.path(out_dir, "models")
   dir.create(model_dir, recursive = TRUE, showWarnings = FALSE)
   
   # Class weights enabled/disabled according to training data class imbalance
   class_weights <- if (prep$cl_imbalance_training == FALSE) {
-    message("Class weights disabled")
+    message("   Class weights disabled")
     FALSE
   } else {
-    message("Class weights enabled")
+    message("   Class weights enabled")
     TRUE
   }
   
@@ -186,33 +199,34 @@ create_model <- function(
   
   num_cores <- cfg$num_cores
   n_cv <- cfg$n_cv
-  
-  rf_model <- suppressMessages(
+
+  message ("   Training RF model")
+  mod <- suppressMessages(
     withCallingHandlers(
       tryCatch({
-        rf_model <- TrainModels(
+        mod <- TrainModels(
           prep$obj,
           model_type = "RF",
-          TaskName = paste0(safe_comp, "_RF"),
+          TaskName = paste0(comparison, "_RF"),
           ClassWeights = class_weights,
           TrueLabel = disease,
           num_cores = num_cores,
           n_cv = n_cv)
-        
-        rf_model <- EvaluateModel(
-          rf_model,
+
+        mod <- EvaluateModel(
+          mod,
           model_type = "RF",
+          TaskName = paste0(comparison, "_RF_test"),
           outdir = model_dir,
-          TaskName = paste0(safe_comp, "_RF_test"),
           TrueLabel = disease,
           PlotAUC = FALSE)
         
         file.rename(
-          file.path(model_dir, paste0("CrcBiomeScreenObject_", safe_comp, "_RF_test.rds")),
-          file.path(model_dir, paste0(safe_comp, "_RF.rds")))
-        
-        rf_model
-      
+          file.path(model_dir, paste0("CrcBiomeScreenObject_", comparison, "_RF_test.rds")),
+          file.path(model_dir, paste0(comparison, "_RF_only.rds")))
+
+        mod
+
       }, error = function(e) {
         error_msg <<- e$message
         message("RF failed: ", e$message)
@@ -222,10 +236,46 @@ create_model <- function(
         warnings <<- c(warnings, conditionMessage(w))
         invokeRestart("muffleWarning")
       }))
-        
-  # TODO XGBoost model
+
+  message ("   Training XGBoost model")
+  mod <- suppressMessages(
+    withCallingHandlers(
+      tryCatch({
+        mod <- TrainModels(
+          mod,
+          model_type = "XGBoost",
+          TaskName = paste0(comparison, "_XGB"),
+          ClassWeights = class_weights,
+          TrueLabel = disease,
+          num_cores = num_cores,
+          n_cv = n_cv)
+
+        mod <- EvaluateModel(
+          mod,
+          model_type = "XGBoost",
+          TaskName = paste0(comparison, "_XGB_test"),
+          outdir = model_dir,
+          TrueLabel = disease,
+          PlotAUC = FALSE)
+
+        file.rename(
+          file.path(model_dir, paste0("CrcBiomeScreenObject_", comparison, "_XGB_test.rds")),
+          file.path(model_dir, paste0(comparison, "_model.rds")))
+
+        mod
+
+      }, error = function(e) {
+        error_msg <<- e$message
+        message("XGBoost failed: ", e$message)
+        NULL
+      }),
+      warning = function(w) {
+        warnings <<- c(warnings, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }))
+  
   return(list(
-    rf_model = rf_model,
+    model = mod,
     class_weights = class_weights,
     warnings = unique(warnings),
     error = error_msg,
@@ -236,7 +286,7 @@ create_model <- function(
 #' samples before and after QC, outliers and training dataset class balance,
 #' then append training_res$qc_summary and return training_res
 log_qc <- function(
-    comparison_name, 
+    comparison, 
     cohort_name,
     prep,
     training_res) {
@@ -247,7 +297,7 @@ log_qc <- function(
   }
   
   row <- data.frame(
-    comparison = comparison_name,
+    comparison = comparison,
     cohort = cohort_name,
     disease = prep$disease,
     norm_method = prep$norm_method,
@@ -277,7 +327,7 @@ log_qc <- function(
     
     stringsAsFactors = FALSE)
   
-  training_res$qc_summary[[comparison_name]] <- row
+  training_res$qc_summary[[comparison]] <- row
   
   return(training_res)
 }
@@ -285,7 +335,7 @@ log_qc <- function(
 #' Log model training status for a single comparison, append 
 #' training_res$training_log and return training_res
 log_training <- function(
-    comparison_name, 
+    comparison, 
     cohort_name, 
     disease, 
     status = NULL,
@@ -298,14 +348,15 @@ log_training <- function(
     training_res$training_log <- list()
   }
   
-  create_log <- function(status, reason, AUC = NA_real_) {
+  create_log <- function(status, reason, AUC_RF = NA_real_, AUC_XGB = NA_real_) {
     data.frame(
-      comparison = comparison_name,
+      comparison = comparison,
       cohort = cohort_name,
       disease = disease,
       status = status,
       reason = reason,
-      internal_AUC = AUC,
+      AUC_RF = AUC_RF,
+      AUC_XGB = AUC_XGB,
       error = if (length(model$error) == 0) NA_character_ else 
         paste(model$error, collapse = "| "),
       warnings = if (length(model$warnings) == 0) NA_character_ else
@@ -317,29 +368,42 @@ log_training <- function(
   
   # Case 1: explicit SKIPPED when condition_invalid == TRUE
   if (!is.null(status) && status == "SKIPPED") {
-    training_res$training_log[[comparison_name]] <-
-      create_log("SKIPPED", reason, NA_real_)
+    training_res$training_log[[comparison]] <-
+      create_log("SKIPPED", reason, NA_real_, NA_real_)
     return(training_res)
   }
   
   # Case 2: null result
-  # TODO this is not triggered when models aren't created. try with model$rf_model?
-  if (is.null(model) || is.null(model$rf_model)) {
-    training_res$training_log[[comparison_name]] <-
-      create_log("FAILED", "training returned NULL", NA_real_)
+  if (is.null(model) || is.null(model$model)) {
+    training_res$training_log[[comparison]] <-
+      create_log("FAILED", "training returned NULL", NA_real_, NA_real_)
     return(training_res)
   
   # Case 3: success
+  # } else {
+  #   AUC <- tryCatch(
+  #     as.numeric(sub(".*: ", "", model$mod@EvaluateResult$RF$AUC)),
+  #     error = function(e) NA_real_
+  #   )
+  #   
+  #   message(paste0("AUC = ", AUC))
+    
   } else {
-    AUC <- tryCatch(
-      as.numeric(sub(".*: ", "", model$rf_model@EvaluateResult$RF$AUC)),
-      error = function(e) NA_real_
-    )
+    extract_auc <- function(auc_val) {
+      tryCatch(
+        as.numeric(sub(".*: ", "", auc_val)),
+        error = function(e) NA_real_
+      )
+    }
     
-    message(paste0("AUC = ", AUC))
+    AUC_RF <- extract_auc(model$model@EvaluateResult$RF$AUC)
+    AUC_XGB <- extract_auc(model$model@EvaluateResult$XGBoost$AUC)
     
-    training_res$training_log[[comparison_name]] <-
-      create_log("SUCCESS", NA_character_, AUC)
+    message(paste0("   RF AUC = ", AUC_RF))
+    message(paste0("   XGB AUC = ", AUC_XGB))
+    
+    training_res$training_log[[comparison]] <-
+      create_log("SUCCESS", NA_character_, AUC_RF, AUC_XGB)
   }
   
   return(training_res)
@@ -348,7 +412,7 @@ log_training <- function(
 #' Log model from a single training, append training_res$all_models and return 
 #' training_res
 log_result <- function(
-    comparison_name, 
+    comparison, 
     model,
     training_res){
   
@@ -357,8 +421,8 @@ log_result <- function(
     training_res$all_models <- list()
   }
   
-  if (!is.null(model$rf_model)) {
-    training_res$all_models[[comparison_name]] <- model$rf_model
+  if (!is.null(model$model)) {
+    training_res$all_models[[comparison]] <- model$model
   }
   
   return(training_res)
@@ -369,14 +433,14 @@ log_result <- function(
 run_pipeline <- function(
     cohort,
     cohort_name,
-    comparison_name,
+    comparison,
     disease,
     training_res){
   
   # Prepare cohort for training and log QC results
   prep <- run_qc(
     cohort = cohort,
-    comparison_name = comparison_name,
+    comparison = comparison,
     disease = disease,
     out_dir = out_dir)
   
@@ -385,18 +449,18 @@ run_pipeline <- function(
     out_dir = out_dir)
   
   training_res <- log_qc(
-    comparison_name, 
+    comparison, 
     cohort_name = cohort_name,
     prep = prep,
     training_res = training_res)
   
-  message(paste0("N training samples = ", prep$n_status_training))
+  message(paste0("   N training samples = ", prep$n_status_training))
   
   # Skip training if n_sample too small
   if (prep$n_status_training != "OK") {
     
     training_res <- log_training(
-      comparison_name,
+      comparison,
       cohort_name = cohort_name,
       disease = disease,
       status = "SKIPPED",
@@ -416,19 +480,19 @@ run_pipeline <- function(
   model <- create_model(
     prep,
     disease = disease,
-    comparison = comparison_name,
+    comparison = comparison,
     out_dir = out_dir,
     cfg = cfg)
   
   training_res <- log_training(
-    comparison_name, 
+    comparison, 
     cohort_name = cohort_name, 
     disease = disease, 
     model = model,
     training_res = training_res) 
   
   training_res <- log_result(
-    comparison_name,
+    comparison,
     model = model,
     training_res = training_res)
   
@@ -457,7 +521,7 @@ run_training <- function(cohort_list, out_dir) {
     
     if (!is.null(condition_invalid)) {
       training_res <- log_training(
-        comparison_name = NA_character_,
+        comparison = NA_character_,
         cohort_name,
         disease = NA_character_,
         status = "SKIPPED",
@@ -469,16 +533,17 @@ run_training <- function(cohort_list, out_dir) {
     # TRAINING BRANCH 1: healthy x 1 disease
     if (info$n_diseases == 1) {
       
-      disease = info$diseases
-    
-      comparison_name <- paste(cohort_name, disease, sep = "_")
+      disease <- clean_label(info$diseases)
+      
+      comparison <- paste(cohort_name, disease, sep = "_")
+      
       message("\n", cohort_name, ": healthy vs ", info$diseases)
       
       training_res <- run_pipeline(
         cohort = cohort,
         cohort_name = cohort_name,
         disease = disease,
-        comparison_name = comparison_name,
+        comparison = comparison,
         training_res = training_res)
       
     # TRAINING BRANCH 2: healthy x >1 disease
@@ -486,20 +551,22 @@ run_training <- function(cohort_list, out_dir) {
       message("\n", cohort_name, ": healthy vs ", info$n_diseases, " diseases")
 
       for (disease in info$diseases) {
-        message("\n", cohort_name, " subset: healthy vs ", disease)
+        
+        disease <- clean_label(disease)
+        comparison <- paste(cohort_name, disease, sep = "_")
+        
+        message("\n [subset] ", cohort_name, ": healthy vs ", disease)
 
         # Subset cohort for healthy x 1 disease
         meta <- as.data.frame(colData(cohort))
         keep <- meta$study_condition %in% c("control", disease)
         cohort_subset <- cohort[, keep]
 
-        comparison_name <- paste(cohort_name, disease, sep = "_")
-        
         training_res <- run_pipeline(
           cohort = cohort_subset,
           cohort_name = cohort_name,
           disease = disease,
-          comparison_name = comparison_name,
+          comparison = comparison,
           training_res = training_res)
       }
     }
@@ -530,11 +597,11 @@ export_training <- function(training_res, out_dir) {
 
 
 # Load data --------------------------------------------------------------------
-test_cohorts <- readRDS("data/test_cohorts.rds")
-
-# primary_cohorts <- readRDS("data/primary_cohorts.rds")
+# test_cohorts <- readRDS("data/test_cohorts.rds")
+primary_cohorts <- readRDS("data/primary_cohorts.rds")
 
 
 # Execute ----------------------------------------------------------------------
-training_res <- run_training(test_cohorts, out_dir)
+training_res <- run_training(primary_cohorts, out_dir)
 export_training(training_res, out_dir)
+
