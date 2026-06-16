@@ -454,7 +454,7 @@ run_pipeline <- function(
     prep = prep,
     training_res = training_res)
   
-  message(paste0("   N training samples = ", prep$n_status_training))
+  message(paste0("   N training samples: ", prep$n_status_training))
   
   # Skip training if n_sample too small
   if (prep$n_status_training != "OK") {
@@ -598,10 +598,10 @@ export_training <- function(training_res, out_dir) {
 
 # Load data --------------------------------------------------------------------
 # test_cohorts <- readRDS("data/test_cohorts.rds")
-primary_cohorts <- readRDS("data/primary_cohorts.rds")
+primary_a_cohorts <- readRDS("data/primary_a_cohorts.rds")
 
 
 # Execute ----------------------------------------------------------------------
-training_res <- run_training(primary_cohorts, out_dir)
+training_res <- run_training(primary_a_cohorts, out_dir)
 export_training(training_res, out_dir)
 

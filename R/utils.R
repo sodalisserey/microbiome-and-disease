@@ -145,7 +145,7 @@ get_config <- function() {
       num_cores = as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "1")),
       n_cv = 10,
       mode = "slurm")
-    message("Running under Slurm")
+    message("   Running under Slurm")
     
   } else {
     cfg <- list(
@@ -154,5 +154,8 @@ get_config <- function() {
       mode = "local")
     message("   Running locally")
   }
+  message(paste0("num_cores =", cfg$num_cores))
+  message(paste0("n_cv =", cfg$n_cv))
+  
   return(cfg)
 }
