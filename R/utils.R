@@ -6,8 +6,8 @@ library(SummarizedExperiment)
 
 
 # Define functions -------------------------------------------------------------
-#' Read cohort list from txt file
-read_cohort_list <- function(path) {
+#' Read cohort list from txt file 
+read_cohort_list <- function(path) { 
   
   lines <- readLines(path, warn = FALSE)
   
@@ -23,7 +23,7 @@ read_cohort_list <- function(path) {
 load_cohorts <- function(cohorts) {
   
   out <- lapply(cohorts, function(study) {
-    message("\n[handler] Loading: ", study)
+    message("\nLoading: ", study)
     
     tryCatch({
       
@@ -132,16 +132,24 @@ write_csvs <- function(out_dir, data_list) {
   message("\nDone. CSVs written to: ", file.path(out_dir))
 }
 
-
-# Read and save cohorts --------------------------------------------------------
-# primary_cohorts <- read_cohort_list("data/primary.txt")
-# saveRDS(load_cohorts(primary_cohorts), "data/primary_cohorts.rds")
-# primary_cohorts <- readRDS("data/primary_cohorts.rds")
-
-# test_cohorts <- read_cohort_list("data/test.txt")
-# saveRDS(load_cohorts(test_cohorts), "data/test_cohorts.rds")
-# test_cohorts <- readRDS("data/test_cohorts.rds")
-# 
-# no_contrast_cohorts <- read_cohort_list("data/no_contrast.txt")
-# saveRDS(load_cohorts(no_contrast_cohorts), "data/no_contrast_cohorts.rds")
-# test_cohorts <- readRDS("data/no_contrast_cohorts.rds")
+#' Get computing configuration
+get_config <- function() {
+  
+  is_slurm <- nzchar(Sys.getenv("SLURM_JOB_ID"))
+  
+  if (is_slurm) {
+    cfg <- list(
+      num_cores = as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "1")),
+      n_cv = 10,
+      mode = "slurm")
+    message("Running under Slurm")
+    
+  } else {
+    cfg <- list(
+      num_cores = 1,
+      n_cv = 2,
+      mode = "local")
+    message("Running locally")
+  }
+  return(cfg)
+}

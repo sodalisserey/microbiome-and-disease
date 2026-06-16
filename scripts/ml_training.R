@@ -1,6 +1,6 @@
 # Train ML models using CrcBiomeScreen package
 # 1. Define output directory and functions
-# 2. Load data using utils.R
+# 2. Load data from cohorts.R
 # 3. Execute main functions:
 #   a. run_training()
 #     * Clean, extract disease and validate conditions
@@ -89,8 +89,8 @@ run_qc <- function(
     warnings = if (length(warnings) == 0) NA_character_ else
       paste(warnings, collapse = " | "),
     
-    n_features = ncol(obj@OrginalNormalizedData),
-    n_samples = nrow(obj@OrginalNormalizedData),
+    n_features = ncol(obj@OriginalNormalizedData),
+    n_samples = nrow(obj@OriginalNormalizedData),
     
     outliers = obj@OutlierSamples,
     n_features_qc = ncol(obj@NormalizedData),
@@ -164,7 +164,8 @@ create_model <- function(
     prep,
     disease,
     comparison,
-    out_dir) {
+    out_dir,
+    cfg) {
   
   safe_comp <- gsub("[/\\\\]", "", comparison)
   
@@ -183,6 +184,9 @@ create_model <- function(
   warnings <- character()
   error_msg <- NULL
   
+  num_cores <- cfg$num_cores
+  n_cv <- cfg$n_cv
+  
   rf_model <- suppressMessages(
     withCallingHandlers(
       tryCatch({
@@ -192,11 +196,8 @@ create_model <- function(
           TaskName = paste0(safe_comp, "_RF"),
           ClassWeights = class_weights,
           TrueLabel = disease,
-          # TODO change values
-          # num_cores = 5,
-          # n_cv = 10)
-          num_cores = 1,
-          n_cv = 2)
+          num_cores = num_cores,
+          n_cv = n_cv)
         
         rf_model <- EvaluateModel(
           rf_model,
@@ -289,7 +290,7 @@ log_training <- function(
     disease, 
     status = NULL,
     reason = NULL,
-    model,
+    model = list(error = NA, warnings = NA, class_weights = NA),
     training_res) {
   
   # Initialise container if missing
@@ -410,11 +411,14 @@ run_pipeline <- function(
   }
     
   # Train model on cohort, log training info/status and save results
+  cfg <- get_config()
+  
   model <- create_model(
     prep,
     disease = disease,
     comparison = comparison_name,
-    out_dir = out_dir)
+    out_dir = out_dir,
+    cfg = cfg)
   
   training_res <- log_training(
     comparison_name, 
@@ -526,11 +530,9 @@ export_training <- function(training_res, out_dir) {
 
 
 # Load data --------------------------------------------------------------------
-# primary_cohorts <- readRDS("data/primary_cohorts.rds") |>
-#   create_cohort_objects()
+test_cohorts <- readRDS("data/test_cohorts.rds")
 
-test_cohorts <- readRDS("data/test_cohorts.rds") |>
-  create_cohort_objects()
+# primary_cohorts <- readRDS("data/primary_cohorts.rds")
 
 
 # Execute ----------------------------------------------------------------------
