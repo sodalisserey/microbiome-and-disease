@@ -30,7 +30,7 @@ source("R/utils.R")
 
 
 # Define output directory ------------------------------------------------------
-out_dir <- "results/lefse_analysis"
+out_dir <- "results/01_lefse_analyse"
 
 
 # Define helper functions ------------------------------------------------------

@@ -53,7 +53,7 @@ load_cohorts <- function(cohorts) {
 }
 
 #' Extract TreeSummarizedExperiment objects from primary cohorts dataset
-create_cohort_objects <- function(cohorts) {
+create_cohort_obj <- function(cohorts) {
   
   lapply(names(cohorts), function(nm) {
     
@@ -145,17 +145,24 @@ get_config <- function() {
       num_cores = as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "1")),
       n_cv = 10,
       mode = "slurm")
-    message("   Running under Slurm")
+    message("   Running under Slurm: num_cores = ", cfg$num_cores, ", n_cv = ", cfg$n_cv)
     
   } else {
     cfg <- list(
       num_cores = 1,
       n_cv = 2,
       mode = "local")
-    message("   Running locally")
+    message("   Running locally: num_cores = ", cfg$num_cores, ", n_cv = ", cfg$n_cv)
   }
-  message(paste0("num_cores =", cfg$num_cores))
-  message(paste0("n_cv =", cfg$n_cv))
+  # message(paste0("   num_cores = ", cfg$num_cores))
+  # message(paste0("   n_cv = ", cfg$n_cv))
   
   return(cfg)
+}
+
+#' Extract AUC from CrcBiomeScreenObject
+extract_auc <- function(auc_val) {
+  tryCatch(
+    as.numeric(sub(".*: ", "", auc_val)),
+    error = function(e) NA_real_)
 }

@@ -16,8 +16,8 @@ library(stringr)
 
 
 # Define input/output directory ------------------------------------------------
-in_dir <- "results/lefse_analysis"
-out_dir <- "results/lefse_analysis/plots"
+in_dir <- "results/01_lefse_analyse"
+out_dir <- "results/02_lefse_plot"
 
 
 # Define helper functions ------------------------------------------------------
