@@ -1,14 +1,12 @@
 # Train ML model on a single processed comparison using CrcBiomeScreen package
 # 1. Define output directory, functions and args
-# 3. Execute main functions:
-#   a. run_training()
+# 2. Execute main function run_training():
 #     * Read processed (normalised and partitioned) comparison object
 #     * Validate training dataset sample sizes
 #     * Get computing configuration
 #     * Execute run_model() and log_model()
-#   b. export_training()
-#     * Save model as results/ml_training/models/[comparison]_model.rds
-#     * Save log as results/ml_training/[comparison]_model_log.csv
+#     * Save model object as out_dir/models/[comparison]_model.rds
+#     * Save model_log as out_dir/logs/[comparison]_model_log.csv
 
 
 # Load packages and dependencies -----------------------------------------------
@@ -79,37 +77,37 @@ run_model <- function(
         invokeRestart("muffleWarning")
       }))
 
-  message ("   Training XGBoost model")
-  mod <- suppressMessages(
-    withCallingHandlers(
-      tryCatch({
-        mod <- TrainModels(
-          mod,
-          model_type = "XGBoost",
-          TaskName = paste0(comparison, "_XGB"),
-          ClassWeights = class_weights,
-          TrueLabel = disease,
-          num_cores = num_cores,
-          n_cv = n_cv)
-
-        mod <- EvaluateModel(
-          mod,
-          model_type = "XGBoost",
-          TaskName = paste0(comparison, "_XGB_test"),
-          TrueLabel = disease,
-          PlotAUC = FALSE)
-
-        mod
-
-      }, error = function(e) {
-        error_msg <<- e$message
-        message("XGBoost failed: ", e$message)
-        NULL
-      }),
-      warning = function(w) {
-        warnings <<- c(warnings, conditionMessage(w))
-        invokeRestart("muffleWarning")
-      }))
+  # message ("   Training XGBoost model")
+  # mod <- suppressMessages(
+  #   withCallingHandlers(
+  #     tryCatch({
+  #       mod <- TrainModels(
+  #         mod,
+  #         model_type = "XGBoost",
+  #         TaskName = paste0(comparison, "_XGB"),
+  #         ClassWeights = class_weights,
+  #         TrueLabel = disease,
+  #         num_cores = num_cores,
+  #         n_cv = n_cv)
+  # 
+  #       mod <- EvaluateModel(
+  #         mod,
+  #         model_type = "XGBoost",
+  #         TaskName = paste0(comparison, "_XGB_test"),
+  #         TrueLabel = disease,
+  #         PlotAUC = FALSE)
+  # 
+  #       mod
+  # 
+  #     }, error = function(e) {
+  #       error_msg <<- e$message
+  #       message("XGBoost failed: ", e$message)
+  #       NULL
+  #     }),
+  #     warning = function(w) {
+  #       warnings <<- c(warnings, conditionMessage(w))
+  #       invokeRestart("muffleWarning")
+  #     }))
   
   return(list(
     model = mod,
@@ -160,8 +158,17 @@ log_model <- function(
   } 
   
   # If success
-  AUC_RF <- extract_auc(result$model@EvaluateResult$RF$AUC)
-  AUC_XGB <- extract_auc(result$model@EvaluateResult$XGBoost$AUC)
+  AUC_RF <- if (length(result$model@EvaluateResult$RF$AUC) == 0) {
+    NA_real_
+  } else {
+    extract_auc(result$model@EvaluateResult$RF$AUC)
+  }
+  
+  AUC_XGB <- if (length(result$model@EvaluateResult$XGBoost$AUC) == 0) {
+    NA_real_
+  } else {
+    extract_auc(result$model@EvaluateResult$XGBoost$AUC)
+  }
   
   message(paste0("   > RF AUC = ", AUC_RF))
   message(paste0("   > XGB AUC = ", AUC_XGB))
@@ -169,16 +176,31 @@ log_model <- function(
   create_log("SUCCESS", NA_character_, AUC_RF, AUC_XGB)
 }
 
-# Define main functions --------------------------------------------------------
+# Define main function ---------------------------------------------------------
 #' Run training for a single processed object
 run_training <- function(file, out_dir) {
   
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   
-  message("Loading: ", basename(file))
+  message("\nLoading: ", basename(file))
   
   # Read partitioned object
   part_obj <- readRDS(file)
+  
+  # Define model path
+  mod_dir <- file.path(out_dir, "models")
+  dir.create(mod_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  # Find file path
+  model_file <- file.path(
+    mod_dir,
+    paste0(part_obj$comparison, "_model.rds"))
+  
+  # Skip if model already exists
+  if (file.exists(model_file)) {
+    message("   Skipping: model already exists at ", basename(model_file))
+    return(NULL)
+  }
   
   # Check n_training_status
   if (part_obj$n_status_training != "OK") {
@@ -194,12 +216,9 @@ run_training <- function(file, out_dir) {
     part_obj = part_obj,
     cfg = cfg)
   
-  log_df <- log_model(result)
+  model_log <- log_model(result)
   
   # Save model
-  mod_dir <- file.path(out_dir, "models")
-  dir.create(mod_dir, recursive = TRUE, showWarnings = FALSE)
-  
   if (result$status == "SUCCESS") {
     saveRDS(
       result$model,
@@ -211,7 +230,7 @@ run_training <- function(file, out_dir) {
   dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
   
   write.csv(
-    log_df,
+    model_log,
     file.path(log_dir, paste0(result$comparison, "_model_log.csv")),
     row.names = FALSE)
   
@@ -220,13 +239,18 @@ run_training <- function(file, out_dir) {
 
 
 # Define args ------------------------------------------------------------------
-args <- commandArgs(trailingOnly = TRUE)
-file <- args[1]
+# args <- commandArgs(trailingOnly = TRUE)
+# file <- args[1]
+# 
+# if (length(args) != 1) {
+#   stop("Usage: Rscript ml_train.R <processed.rds>")
+# }
 
-if (length(args) != 1) {
-  stop("Usage: Rscript ml_train.R <processed.rds>")
-}
-
+files <- list.files("results/04_ml_process/processed", pattern = "\\_processed.rds$", full.names = TRUE)
 
 # Execute ----------------------------------------------------------------------
-run_training(file, out_dir)
+# run_training(file, out_dir)
+
+for (file in files) {
+  run_training(file, out_dir)
+}
