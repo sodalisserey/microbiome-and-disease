@@ -4,6 +4,7 @@
 # 3. Execute main functions:
 #   a. run_analysis()
 #     * Clean, extract disease and validate conditions
+#       TODO collapse branches via comparisons
 #     * ANALYSIS BRANCH 1 (healthy x 1 disease) -> run_pipeline() executes:
 #           - run_qc() 
 #           - run_lefser() 
@@ -14,12 +15,9 @@
 #           - Create pair-wise subsets
 #           - Execute run_pipeline()
 #   b. export_analysis()
-#     * Bulk save analysis results into:
-#           - results/lefse_analysis/qc_summary.csv
-#           - results/lefse_analysis/contingency_tables.csv
-#           - results/lefse_analysis/analysis_log.csv
-#           - results/lefse_analysis/lefse_results.csv
-#           - results/lefse_analysis/lefse_results.rds
+#     * Save lefse_results, contingency_tables, qc_summary and analysis_log  
+#       as out_dir/[log].csv
+#     * Save bulk lefse_result object as out_dir/lefse_results.rds
 
 
 # Load packages and dependencies -----------------------------------------------

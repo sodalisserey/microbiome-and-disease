@@ -1,4 +1,14 @@
 # Process ML models for training using CrcBiomeScreen package
+# 1. Define output directory and functions
+# 2. Execute main functions:
+#   a. run_processing()
+#     * Process, extract and validate study_conditions
+#     * Execute run_qc() and log_qc() on each cohort
+#     * Execute run_pipeline() calling run_partition() and log_partition()
+#   b. export_processing()
+#     * Save processed object as out_dir/processed/[comparison]_processed.rds
+#     * Save qc_summary and partition_summary as out_dir/[summary_type].csv
+
 
 # Load packages and dependencies -----------------------------------------------
 library(CrcBiomeScreen)
@@ -296,6 +306,7 @@ run_processing <- function(cohort_list, out_dir) {
     
     diseases <- clean_label(info$diseases)
     
+    # Run partition pipeline for each comparison
     for (disease in diseases) {
       
       processing_res <- run_pipeline(

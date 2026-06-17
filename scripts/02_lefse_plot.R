@@ -1,12 +1,12 @@
 # Import LEfSe results from csv, generate and save plots
 # 1. Define input/output directories and functions
-# 2. Load LEfSe data from csv
-# 3. Execute export_plots() which runs:
-#     * extract_species()
-#     * log_plot(), which executes smart_case() and process_scores()
-#     * create_plot()
-#     * save_plot()
-#    And saves plots as [comparison].pdf into results/lefse_analysis/plots
+# 2. Load LEfSe data from in_dir/lefse_results.csv
+# 3. Execute main function export_plots():
+#     * Extract and format species column via extract_species()
+#     * Create and log plot via create_plot() and log_plot() 
+#     * Save plots as out_dir/[comparison].pdf
+#     * Save plot_log into out_dir/_plot_log.csv
+
 
 
 # Load packages ----------------------------------------------------------------

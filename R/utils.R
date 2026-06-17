@@ -102,7 +102,9 @@ process_conditions <- function(cohort,
 }
 
 #' Remove / from string to generate clean label
-clean_label <- function(x) gsub("/", "", x)
+clean_label <- function(x) {
+  gsub("[/-]", "", x)
+}
 
 #' Check conditions contrast in cohort and print error message if no healthy or
 #' disease samples present 
@@ -154,9 +156,6 @@ get_config <- function() {
       mode = "local")
     message("   Running locally: num_cores = ", cfg$num_cores, ", n_cv = ", cfg$n_cv)
   }
-  # message(paste0("   num_cores = ", cfg$num_cores))
-  # message(paste0("   n_cv = ", cfg$n_cv))
-  
   return(cfg)
 }
 
