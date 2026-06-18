@@ -16,7 +16,7 @@ source("R/utils.R")
 
 
 # Define output directory ------------------------------------------------------
-out_dir <- "results/05_ml_train"
+out_dir <- "results/05_ml_train_array"
 
 
 # Define helper functions ------------------------------------------------------
@@ -77,37 +77,37 @@ run_model <- function(
         invokeRestart("muffleWarning")
       }))
 
-  # message ("   Training XGBoost model")
-  # mod <- suppressMessages(
-  #   withCallingHandlers(
-  #     tryCatch({
-  #       mod <- TrainModels(
-  #         mod,
-  #         model_type = "XGBoost",
-  #         TaskName = paste0(comparison, "_XGB"),
-  #         ClassWeights = class_weights,
-  #         TrueLabel = disease,
-  #         num_cores = num_cores,
-  #         n_cv = n_cv)
-  # 
-  #       mod <- EvaluateModel(
-  #         mod,
-  #         model_type = "XGBoost",
-  #         TaskName = paste0(comparison, "_XGB_test"),
-  #         TrueLabel = disease,
-  #         PlotAUC = FALSE)
-  # 
-  #       mod
-  # 
-  #     }, error = function(e) {
-  #       error_msg <<- e$message
-  #       message("XGBoost failed: ", e$message)
-  #       NULL
-  #     }),
-  #     warning = function(w) {
-  #       warnings <<- c(warnings, conditionMessage(w))
-  #       invokeRestart("muffleWarning")
-  #     }))
+  message ("   Training XGBoost model")
+  mod <- suppressMessages(
+    withCallingHandlers(
+      tryCatch({
+        mod <- TrainModels(
+          mod,
+          model_type = "XGBoost",
+          TaskName = paste0(comparison, "_XGB"),
+          ClassWeights = class_weights,
+          TrueLabel = disease,
+          num_cores = num_cores,
+          n_cv = n_cv)
+
+        mod <- EvaluateModel(
+          mod,
+          model_type = "XGBoost",
+          TaskName = paste0(comparison, "_XGB_test"),
+          TrueLabel = disease,
+          PlotAUC = FALSE)
+
+        mod
+
+      }, error = function(e) {
+        error_msg <<- e$message
+        message("XGBoost failed: ", e$message)
+        NULL
+      }),
+      warning = function(w) {
+        warnings <<- c(warnings, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }))
   
   return(list(
     model = mod,
@@ -187,11 +187,15 @@ run_training <- function(file, out_dir) {
   # Read partitioned object
   part_obj <- readRDS(file)
   
+  # Define log path
+  log_dir <- file.path(out_dir, "logs")
+  dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+  
   # Define model path
   mod_dir <- file.path(out_dir, "models")
   dir.create(mod_dir, recursive = TRUE, showWarnings = FALSE)
   
-  # Find file path
+  # Find processed comparison file path
   model_file <- file.path(
     mod_dir,
     paste0(part_obj$comparison, "_model.rds"))
@@ -226,9 +230,6 @@ run_training <- function(file, out_dir) {
   }
   
   # Save log
-  log_dir <- file.path(out_dir, "logs")
-  dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
-  
   write.csv(
     model_log,
     file.path(log_dir, paste0(result$comparison, "_model_log.csv")),
@@ -239,18 +240,18 @@ run_training <- function(file, out_dir) {
 
 
 # Define args ------------------------------------------------------------------
-# args <- commandArgs(trailingOnly = TRUE)
-# file <- args[1]
-# 
-# if (length(args) != 1) {
-#   stop("Usage: Rscript ml_train.R <processed.rds>")
-# }
+args <- commandArgs(trailingOnly = TRUE)
+file <- args[1]
 
-files <- list.files("results/04_ml_process/processed", pattern = "\\_processed.rds$", full.names = TRUE)
+if (length(args) != 1) {
+  stop("Usage: Rscript ml_train.R <processed.rds>")
+}
+
+# files <- list.files("results/04_ml_process/processed", pattern = "\\_processed.rds$", full.names = TRUE)
 
 # Execute ----------------------------------------------------------------------
-# run_training(file, out_dir)
+run_training(file, out_dir)
 
-for (file in files) {
-  run_training(file, out_dir)
-}
+# for (file in files) {
+#   run_training(file, out_dir)
+# }

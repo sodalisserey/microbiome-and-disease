@@ -737,7 +737,7 @@
       "RemoteRepo": "CrcBiomeScreen",
       "RemoteUsername": "omicsForestry",
       "RemoteRef": "fix-xgboost-module",
-      "RemoteSha": "45e12f7c188475cce12dd6d5f6ff4b3dff653cca",
+      "RemoteSha": "2f437e0af7f7929984527892f65425707e111507",
       "NeedsCompilation": "no",
       "Author": "Chengxin Li [cre, aut] (ORCID: <https://orcid.org/0009-0004-0840-9027>), Rishabh Bezbaruah [aut], Henry Wood [aut], Arief Gusnanto [aut]",
       "Maintainer": "Chengxin Li <ngzh5554@leeds.ac.uk>"
