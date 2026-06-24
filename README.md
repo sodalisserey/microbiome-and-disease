@@ -1,6 +1,4 @@
 # Microbiome-and-Disease
-In Progress
-
 ### _Objectives:_
 This study aims to identify robust, reproducible microbiome biomarkers across independent cohorts, using stool-derived metagenomic data from the curatedMetagenomicData R/Bioconductor package.
 
