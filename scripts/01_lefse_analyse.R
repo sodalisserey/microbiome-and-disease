@@ -4,7 +4,6 @@
 # 3. Execute main functions:
 #   a. run_analysis()
 #     * Clean, extract disease and validate conditions
-#       TODO collapse branches via comparisons
 #     * ANALYSIS BRANCH 1 (healthy x 1 disease) -> run_pipeline() executes:
 #           - run_qc() 
 #           - run_lefser() 
@@ -19,6 +18,9 @@
 #       as out_dir/[log].csv
 #     * Save bulk lefse_result object as out_dir/lefse_results.rds
 
+# TODO collapse branches via comparisons
+# TODO filter by sample size before analysis
+# TODO compile contingency table and QC into one output
 
 # Load packages and dependencies -----------------------------------------------
 library(rlang)
@@ -162,7 +164,7 @@ run_lefser <- function(
     control_label = "control",
     seed = 1234) {
   
-  meta <- as.data.frame(colData(cohort))
+  meta <- colData(cohort)
   
   subclass <- NULL
   
@@ -520,8 +522,7 @@ export_analysis <- function(analysis_res, out_dir) {
 
 
 # Load data --------------------------------------------------------------------
-primary_cohorts <- readRDS("data/primary_cohorts.rds") |>
-  create_cohort_objects()
+primary_cohorts <- readRDS("data/primary.rds")
 
 
 # Execute ----------------------------------------------------------------------

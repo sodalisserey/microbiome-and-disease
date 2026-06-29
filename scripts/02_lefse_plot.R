@@ -81,8 +81,9 @@ process_scores <- function(
 log_plot <- function(
     lefse_res_df,
     comparison,
-    min_features = 3,
-    max_features = 30) {
+    # TODO remove repeated code
+    min_features = 2,
+    max_features = 6) {
   
   create_log <- function(
     comp,
@@ -184,25 +185,26 @@ create_plot <- function(
     
     ggplot2::scale_fill_manual(
       values = c(
-        setNames("steelblue", healthy_label),
-        setNames("firebrick", disease_label)),
+        setNames("#c5cb93ff", healthy_label),
+        setNames("#dfa57eff", disease_label)),
       
       name = "Enriched in") +
     
     ggplot2::scale_x_continuous(
       expand = ggplot2::expansion(mult = c(0.05, 0.05))) +
     
-    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme_minimal(base_size = 14) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(
         face = "bold",
-        size = 12,
+        size = 14,
         hjust = 0.5),
       
       axis.text.y = ggplot2::element_text(
-        size = 8,
+        size = 14,
         face = "italic"),
       
+      # TODO legend text size increase
       legend.position = "bottom",
       panel.grid.major.y = ggplot2::element_blank(),
       panel.grid.minor = ggplot2::element_blank()) +
@@ -251,8 +253,8 @@ save_plot <- function(
 export_plots <- function(
     lefse_res,
     out_dir,
-    min_features = 3,
-    max_features = 30) {
+    min_features = 2,
+    max_features = 10) {
   
   dir.create(file.path(out_dir), recursive = TRUE,
              showWarnings = FALSE)
