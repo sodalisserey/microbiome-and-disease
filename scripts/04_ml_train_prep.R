@@ -3,7 +3,7 @@
 # 2. Execute main functions:
 #   a. run_processing()
 #     * Process, extract and validate study_conditions
-#     * Execute run_qc() and log_qc() on each cohort
+#     * Execute R/utils.R/normalise_obj(), qc_obj() and log_qc() on each cohort
 #     * Execute run_pipeline() calling run_partition() and log_partition()
 #   b. export_processing()
 #     * Save processed object as out_dir/processed/[comparison]_processed.rds
@@ -16,117 +16,10 @@ source("R/utils.R")
 
 
 # Define output directory ------------------------------------------------------
-out_dir <- "results/04_ml_process"
+out_dir <- "results/04_ml_train_prep_test"
 
 
 # Define helper functions ------------------------------------------------------
-#' normalisedare cohort by creating CrcBiomeScreenObject, splitting/setting taxa, 
-#' normalising data, filtering study_condition, running QC, splitting dataset 
-#' into training/testing and checking class balance
-run_qc <- function(
-    cohort,
-    cohort_name,
-    out_dir,
-    norm_method = "GMPR") {
-  
-  qc_dir <- file.path(out_dir, "plots")
-  dir.create("results", recursive = TRUE, showWarnings = FALSE)
-  dir.create(qc_dir, recursive = TRUE, showWarnings = FALSE)
-  
-  warnings <- character()
-  
-  result <- withCallingHandlers({
-    obj <- CreateCrcBiomeScreenObject(
-      RelativeAbundance = cohort@assays@data@listData$relative_abundance,
-      TaxaData = cohort@rowLinks$nodeLab,
-      SampleData = cohort@colData)
-    
-    # Split taxa and keep genus level
-    obj <- SplitTaxas(obj)
-    taxa <- getTaxaData(obj)
-    colnames(taxa) <- c("Kingdom","Phylum","Class","Order","Family","Genus","Species")
-    setTaxaData(obj) <- taxa
-    obj <- KeepTaxonomicLevel(obj, level = "Genus")
-    
-    # Normalise data
-    obj <- NormalizeData(obj, method = "GMPR", level = "Genus")
-    
-    # Standardise labels
-    obj@SampleData$study_condition <-
-      clean_label(obj@SampleData$study_condition)
-    
-    # Perform QC
-    suppressMessages(
-      obj <- qcByCmdscale(
-        obj,
-        TaskName = paste0(cohort_name, "_QC"),
-        outdir = qc_dir,
-        normalize_method = norm_method,
-        plot = TRUE))
-
-    file.rename(
-      file.path(qc_dir, paste0("cmdscale_", cohort_name, "_QC_", norm_method, ".pdf")),
-      file.path(qc_dir, paste0(cohort_name, "_QC_", norm_method, ".pdf")))
-    
-  },
-  warning = function(w) {
-    warnings <<- c(warnings, conditionMessage(w))
-    invokeRestart("muffleWarning")
-  })
-  
-  return(list(
-    obj = obj,
-    cohort_name = cohort_name,
-    norm_method = norm_method,
-    warnings = if (length(warnings) == 0) NA_character_ else
-      paste(warnings, collapse = " | "),
-    
-    n_features = ncol(obj@OriginalNormalizedData),
-    n_samples = nrow(obj@OriginalNormalizedData),
-    
-    outliers = obj@OutlierSamples,
-    n_features_qc = ncol(obj@NormalizedData),
-    n_samples_qc = nrow(obj@NormalizedData)))
-}
-
-#' Log QC results from a single cohort_name containing number of features and 
-#' samples before and after QC and outliers, then append processing_res$qc_summary 
-#' and return processing_res
-log_qc <- function(
-    cohort_name, 
-    qc_obj,
-    processing_res) {
-  
-  # initialise containers if missing
-  if (is.null(processing_res$qc_summary)) {
-    processing_res$qc_summary <- list()
-  }
-  
-  row <- data.frame(
-    cohort_name = cohort_name,
-    norm_method = qc_obj$norm_method,
-    warnings = if (length(qc_obj$warnings) == 0) NA_character_ else
-      paste(qc_obj$warnings, collapse = " | "),
-    
-    # N features (genus level) and samples pre-normalisation/qc
-    n_features = qc_obj$n_features,
-    n_samples = qc_obj$n_samples,
-    
-    # Number of outliers identified by QC
-    outliers = if (length(qc_obj$outliers) == 0) NA_character_ else 
-      paste(qc_obj$outliers, collapse = "; "),
-    
-    # N features (genus level) and samples post-normalisation/qc
-    n_features_qc = qc_obj$n_features_qc,
-    n_samples_qc = qc_obj$n_samples_qc,
-    
-    stringsAsFactors = FALSE)
-  
-  processing_res$qc_summary[[cohort_name]] <- row
-  
-  return(processing_res)
-}
-
 #' Split a prepped cohort into training and testing datasets and return norm_obj
 run_partition <- function(
     cohort_name,
@@ -177,16 +70,18 @@ run_partition <- function(
   
   return(list(
     obj = comparison_obj,
-    cohort_name = cohort_name,
-    comparison = comparison,
-    disease = disease,
-    partition_ratio = partition_ratio,
-    n_threshold = n_threshold,
-    cl_ratio_training = max(balance$class_counts)/min(balance$class_counts),
-    cl_imbalance_training = balance$is_imbalanced,
-    n_controls_training = n_controls_training,
-    n_disease_training = n_disease_training,
-    n_status_training = n_status_training))
+    metadata = list(
+      cohort_name = cohort_name,
+      comparison = comparison,
+      disease = disease,
+      partition_ratio = partition_ratio,
+      n_threshold = n_threshold,
+      cl_ratio_training =
+        max(balance$class_counts) / min(balance$class_counts),
+      cl_imbalance_training = balance$is_imbalanced,
+      n_controls_training = n_controls_training,
+      n_disease_training = n_disease_training,
+      n_status_training = n_status_training)))
 }
 
 #' Log partition results containing training dataset class balance and sample 
@@ -208,16 +103,16 @@ log_partition <- function(
     cohort_name = cohort_name,
     disease = disease,
     
-    partition_ratio = part_obj$partition_ratio,
+    partition_ratio = part_obj$metadata$partition_ratio,
     
-    cl_ratio_training = part_obj$cl_ratio_training,
-    cl_imbalance_training = part_obj$cl_imbalance_training,
+    cl_ratio_training = part_obj$metadata$cl_ratio_training,
+    cl_imbalance_training = part_obj$metadata$cl_imbalance_training,
     
-    n_controls_training = part_obj$n_controls_training,
-    n_disease_training = part_obj$n_disease_training,
+    n_controls_training = part_obj$metadata$n_controls_training,
+    n_disease_training = part_obj$metadata$n_disease_training,
     
-    n_status_training = part_obj$n_status_training,
-    n_threshold = part_obj$n_threshold,
+    n_status_training = part_obj$metadata$n_status_training,
+    n_threshold = part_obj$metadata$n_threshold,
 
     
     stringsAsFactors = FALSE)
@@ -229,23 +124,23 @@ log_partition <- function(
 
 #'
 run_pipeline <- function(
-    qc_obj,
+    processed_obj,
     cohort_name,
     disease,
     out_dir,
     processing_res) {
   
-  comp_dir <- file.path(out_dir, "processed")
-  dir.create(comp_dir, recursive = TRUE, showWarnings = FALSE)
+  prep_dir <- file.path(out_dir, "processed")
+  dir.create(prep_dir, recursive = TRUE, showWarnings = FALSE)
   
   comparison <- paste(cohort_name, disease, sep = "_")
   
-  message("Processing: ", comparison)
+  message("Partitioning: ", comparison)
   
   # Filter for single disease
   suppressWarnings(
     comparison_obj <- FilterDataSet(
-      qc_obj$obj,
+      processed_obj$obj,
       label = c("control", disease),
       condition_col = "study_condition"))
   
@@ -266,10 +161,10 @@ run_pipeline <- function(
     processing_res = processing_res)
   
   # Save as norm_obj if suitable
-  if (part_obj$n_status_training == "OK") {
+  if (part_obj$metadata$n_status_training == "OK") {
     saveRDS(
       part_obj,
-      file.path(comp_dir, paste0(comparison, "_processed.rds"))
+      file.path(prep_dir, paste0(comparison, "_processed.rds"))
     )
   }
   return(processing_res)
@@ -293,24 +188,31 @@ run_processing <- function(cohort_list, out_dir) {
   
     message("\nRunning QC: ", cohort_name)
     
-    # Run QC on full cohort
-    qc_obj <- run_qc(
+    # Process (normalise and QC) whole cohort
+    norm_obj <- normalise_obj(
+      cohort = cohort,
+      cohort_name = cohort_name)
+    
+    processed_obj <- qc_obj(
       cohort = cohort,
       cohort_name = cohort_name,
+      obj = norm_obj$obj,
+      norm_method = norm_obj$norm_method,
+      warnings = norm_obj$warnings,
       out_dir = out_dir)
     
-    processing_res <- log_qc(
-      cohort_name = cohort_name,
-      qc_obj = qc_obj,
+    processing_res <- log_qc_obj(
+      cohort_name = cohort_name, 
+      processed_obj = processed_obj,
       processing_res = processing_res)
     
-    diseases <- clean_label(info$diseases)
+    diseases <- clean_condition(info$diseases)
     
     # Run partition pipeline for each comparison
     for (disease in diseases) {
       
       processing_res <- run_pipeline(
-        qc_obj = qc_obj,
+        processed_obj = processed_obj,
         cohort_name = cohort_name,
         disease = disease,
         out_dir = out_dir,
@@ -334,12 +236,21 @@ export_processing <- function(processing_res, out_dir) {
   write_csvs(out_dir, list(
     qc_summary = processing_res$qc_summary,
     partition_summary = processing_res$partition_summary))
+  
+  # Write txt file of all processed file paths
+  files <- list.files(
+    path = file.path(out_dir, "processed"),
+    pattern = "_processed\\.rds$",
+    full.names = TRUE)
+  
+  writeLines(
+    files, file.path(out_dir,"processed_files.txt"))
 }
   
 
 # Load data --------------------------------------------------------------------
-primary_cohorts <- readRDS("data/primary_cohorts.rds")
-
+primary_cohorts <- readRDS("data/primary.rds") |>
+  create_cohort_obj(cohorts = _)
 
 # Execute ----------------------------------------------------------------------
 processing_res <- run_processing(primary_cohorts, out_dir)
