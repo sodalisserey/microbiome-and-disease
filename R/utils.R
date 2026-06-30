@@ -129,87 +129,60 @@ validate_conditions <- function(info, cohort_name) {
 
 # ML training and validation ---------------------------------------------------
 #'
-normalise_obj <- function(
-    cohort,
-    cohort_name,
-    norm_method = "GMPR") {
-  
-  warnings <- character()
-  
-  obj <- withCallingHandlers({
-    
-    obj <- CreateCrcBiomeScreenObject(
-      RelativeAbundance = cohort@assays@data@listData$relative_abundance,
-      TaxaData = cohort@rowLinks$nodeLab,
-      SampleData = cohort@colData)
-    
-    # Split taxa and keep genus level
-    obj <- SplitTaxas(obj)
-    taxa <- getTaxaData(obj)
-    colnames(taxa) <- c("Kingdom","Phylum","Class","Order","Family","Genus","Species")
-    setTaxaData(obj) <- taxa
-    obj <- KeepTaxonomicLevel(obj, level = "Genus")
-    
-    # Normalise data
-    obj <- NormalizeData(obj, method = norm_method, level = "Genus")
-    
-    # Standardise labels
-    obj@SampleData$study_condition <-
-      clean_condition(obj@SampleData$study_condition)
-    
-    obj
-    
-  }, warning = function(w) {
-    warnings <<- c(warnings, conditionMessage(w))
-    invokeRestart("muffleWarning")
-  })
-  
-  return(list(
-    obj = obj,
-    warnings = warnings,
-    norm_method = norm_method))
-}
-
 qc_obj <- function(
-    cohort,
     cohort_name,
-    obj,
-    norm_method,
-    warnings,
-    out_dir) {
+    norm_obj,
+    norm_method = "GMPR",
+    warnings = NA,
+    out_dir,
+    plot = FALSE) {
   
   qc_dir <- file.path(out_dir, "plots")
   dir.create("results", recursive = TRUE, showWarnings = FALSE)
-  dir.create(qc_dir, recursive = TRUE, showWarnings = FALSE)
   
-  suppressMessages(
-    obj <- qcByCmdscale(
-      obj,
-      TaskName = paste0(cohort_name, "_QC"),
-      outdir = qc_dir,
-      normalize_method = norm_method,
-      plot = TRUE))
-  
-  file.rename(
-    file.path(qc_dir, paste0("cmdscale_", cohort_name, "_QC_", norm_method, ".pdf")),
-    file.path(qc_dir, paste0(cohort_name, "_QC_", norm_method, ".pdf")))
-  
+  if (plot == TRUE) {
+    dir.create(qc_dir, recursive = TRUE, showWarnings = FALSE)
+    
+    suppressMessages(
+      obj <- qcByCmdscale(
+        norm_obj,
+        TaskName = paste0(cohort_name, "_QC"),
+        outdir = qc_dir,
+        normalize_method = norm_method,
+        plot = TRUE))
+    
+    file.rename(
+      file.path(qc_dir, paste0("cmdscale_", cohort_name, "_QC_", norm_method, ".pdf")),
+      file.path(qc_dir, paste0(cohort_name, "_QC_", norm_method, ".pdf")))
+    
+  } else{
+    suppressMessages(
+      obj <- qcByCmdscale(
+        norm_obj,
+        TaskName = paste0(cohort_name, "_QC"),
+        outdir = qc_dir,
+        normalize_method = norm_method,
+        plot = FALSE))
+  }
+
   return(list(
-    outliers = obj@OutlierSamples,
     obj = obj,
-    cohort_name = cohort_name,
-    norm_method = norm_method,
-    warnings = warnings,
     
-    n_features = ncol(obj@OriginalNormalizedData),
-    n_samples = nrow(obj@OriginalNormalizedData),
-    
-    n_features_qc = ncol(obj@NormalizedData),
-    n_samples_qc = nrow(obj@NormalizedData)))
+    metadata = list(
+      outliers = obj@OutlierSamples,
+      cohort_name = cohort_name,
+      norm_method = norm_method,
+      warnings = warnings,
+      
+      n_features = ncol(obj@OriginalNormalizedData),
+      n_samples = nrow(obj@OriginalNormalizedData),
+      
+      n_features_qc = ncol(obj@NormalizedData),
+      n_samples_qc = nrow(obj@NormalizedData))))
 }
 
 #'
-log_qc_obj <- function(
+log_training_prep <- function(
     cohort_name, 
     processed_obj,
     processing_res) {
@@ -221,21 +194,21 @@ log_qc_obj <- function(
   
   row <- data.frame(
     cohort_name = cohort_name,
-    norm_method = processed_obj$norm_method,
-    warnings = if (length(processed_obj$warnings) == 0) NA_character_ else
-      paste(processed_obj$warnings, collapse = " | "),
+    norm_method = processed_obj$metadata$norm_method,
+    warnings = if (length(processed_obj$metadata$warnings) == 0) NA_character_ else
+      paste(processed_obj$metadata$warnings, collapse = " | "),
     
     # N features (genus level) and samples pre-normalisation/qc
-    n_features = processed_obj$n_features,
-    n_samples = processed_obj$n_samples,
+    n_features = processed_obj$metadata$n_features,
+    n_samples = processed_obj$metadata$n_samples,
     
     # Number of outliers identified by QC
-    outliers = if (length(processed_obj$outliers) == 0) NA_character_ else 
-      paste(processed_obj$outliers, collapse = "; "),
+    outliers = if (length(processed_obj$metadata$outliers) == 0) NA_character_ else 
+      paste(processed_obj$metadata$outliers, collapse = "; "),
     
     # N features (genus level) and samples post-normalisation/qc
-    n_features_qc = processed_obj$n_features_qc,
-    n_samples_qc = processed_obj$n_samples_qc,
+    n_features_qc = processed_obj$metadata$n_features_qc,
+    n_samples_qc = processed_obj$metadata$n_samples_qc,
     
     stringsAsFactors = FALSE)
   
@@ -275,22 +248,36 @@ extract_auc <- function(auc_val) {
 
 #' Compile individual log csvs from array outputs
 compile_logs <- function(
-    in_dir) {
+    log_dir,
+    file_name) {
   
   files <- list.files(
-    file.path(in_dir, "logs"), 
-    pattern = "\\model_log.csv$", 
+    log_dir, 
+    pattern = "\\.csv$", 
     full.names = TRUE)
   
-  head(read.csv(files[1]))
+  combined_df <- bind_rows(lapply(files, read_csv, show_col_types = FALSE))
   
-  combined_df <- do.call(
-    rbind,
-    lapply(files, read.csv, stringsAsFactors = FALSE))
+  write_csv(combined_df, file.path(log_dir, file_name))
   
-  out_file <- file.path(in_dir, "combined_logs.csv")
-  write.csv(combined_df, out_file, row.names = FALSE)
+  message("\nCombined logs written to: ", file.path(log_dir))
   
-  message("\nCombined logs written to: ", file.path(in_dir))
+  return(combined_df)
+}
+
+
+read_rds_files <- function(file_dir) {
+  
+  files <- list.files(
+    path = file.path(file_dir),
+    pattern = "\\.rds$",
+    full.names = TRUE)
+  
+  names(files) <- file_path_sans_ext(basename(files))
+  
+  rds_files <- lapply(files, readRDS)
+  
+  message("\nRDS files read from: ", file_dir)
+  return(rds_files)
 }
 
