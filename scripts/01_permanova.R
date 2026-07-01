@@ -12,7 +12,7 @@ library(vegan)
 source("R/utils.R")
 
 # Define output directory ------------------------------------------------------
-out_dir <- "results/permanova"
+out_dir <- "results/01_permanova"
 library(readr)
 
 
