@@ -126,97 +126,6 @@ validate_conditions <- function(info, cohort_name) {
 }
 
 
-
-# ML training and validation ---------------------------------------------------
-#'
-qc_obj <- function(
-    cohort_name,
-    norm_obj,
-    norm_method = "GMPR",
-    warnings = NA,
-    out_dir,
-    plot = FALSE) {
-  
-  qc_dir <- file.path(out_dir, "plots")
-  dir.create("results", recursive = TRUE, showWarnings = FALSE)
-  
-  if (plot == TRUE) {
-    dir.create(qc_dir, recursive = TRUE, showWarnings = FALSE)
-    
-    suppressMessages(
-      obj <- qcByCmdscale(
-        norm_obj,
-        TaskName = paste0(cohort_name, "_QC"),
-        outdir = qc_dir,
-        normalize_method = norm_method,
-        plot = TRUE))
-    
-    file.rename(
-      file.path(qc_dir, paste0("cmdscale_", cohort_name, "_QC_", norm_method, ".pdf")),
-      file.path(qc_dir, paste0(cohort_name, "_QC_", norm_method, ".pdf")))
-    
-  } else{
-    suppressMessages(
-      obj <- qcByCmdscale(
-        norm_obj,
-        TaskName = paste0(cohort_name, "_QC"),
-        outdir = qc_dir,
-        normalize_method = norm_method,
-        plot = FALSE))
-  }
-
-  return(list(
-    obj = obj,
-    
-    metadata = list(
-      outliers = obj@OutlierSamples,
-      cohort_name = cohort_name,
-      norm_method = norm_method,
-      warnings = warnings,
-      
-      n_features = ncol(obj@OriginalNormalizedData),
-      n_samples = nrow(obj@OriginalNormalizedData),
-      
-      n_features_qc = ncol(obj@NormalizedData),
-      n_samples_qc = nrow(obj@NormalizedData))))
-}
-
-#'
-log_training_prep <- function(
-    cohort_name, 
-    processed_obj,
-    processing_res) {
-  
-  # initialise containers if missing
-  if (is.null(processing_res$qc_summary)) {
-    processing_res$qc_summary <- list()
-  }
-  
-  row <- data.frame(
-    cohort_name = cohort_name,
-    norm_method = processed_obj$metadata$norm_method,
-    warnings = if (length(processed_obj$metadata$warnings) == 0) NA_character_ else
-      paste(processed_obj$metadata$warnings, collapse = " | "),
-    
-    # N features (genus level) and samples pre-normalisation/qc
-    n_features = processed_obj$metadata$n_features,
-    n_samples = processed_obj$metadata$n_samples,
-    
-    # Number of outliers identified by QC
-    outliers = if (length(processed_obj$metadata$outliers) == 0) NA_character_ else 
-      paste(processed_obj$metadata$outliers, collapse = "; "),
-    
-    # N features (genus level) and samples post-normalisation/qc
-    n_features_qc = processed_obj$metadata$n_features_qc,
-    n_samples_qc = processed_obj$metadata$n_samples_qc,
-    
-    stringsAsFactors = FALSE)
-  
-  processing_res$qc_summary[[cohort_name]] <- row
-  
-  return(processing_res)
-}
-
 #' Get computing configuration
 get_config <- function() {
   
@@ -227,23 +136,30 @@ get_config <- function() {
       num_cores = as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "1")),
       n_cv = 10,
       mode = "slurm")
-    message("   Running under Slurm: num_cores = ", cfg$num_cores, ", n_cv = ", cfg$n_cv)
-    
+    message("\nConfiguration: Slurm (num_cores = ", 
+            cfg$num_cores, " | n_cv = ", cfg$n_cv, ")")
+
   } else {
     cfg <- list(
       num_cores = 1,
       n_cv = 2,
       mode = "local")
-    message("   Running locally: num_cores = ", cfg$num_cores, ", n_cv = ", cfg$n_cv)
+    message("\nConfiguration: local (num_cores = ", 
+            cfg$num_cores, " | n_cv = ", cfg$n_cv, ")")
+    
   }
   return(cfg)
 }
 
 #' Extract AUC from CrcBiomeScreenObject
 extract_auc <- function(auc_val) {
-  tryCatch(
-    as.numeric(sub(".*: ", "", auc_val)),
-    error = function(e) NA_real_)
+  auc <- suppressWarnings(as.numeric(sub(".*: ", "", auc_val)))
+  if (is.na(auc))
+    auc <- NA_real_
+  
+  message("   AUC = ", auc)
+  
+  auc
 }
 
 #' Compile individual log csvs from array outputs
@@ -255,6 +171,9 @@ compile_logs <- function(
     log_dir, 
     pattern = "\\.csv$", 
     full.names = TRUE)
+  
+  # Exclude output file
+  files <- files[basename(files) != file_name]
   
   combined_df <- bind_rows(lapply(files, read_csv, show_col_types = FALSE))
   
