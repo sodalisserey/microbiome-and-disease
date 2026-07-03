@@ -1,31 +1,50 @@
-# Read in comparison_table
-# Read in train_obj and val_obj 
-# Pipeline: 
-#   Partition and filter train_obj 
-#   Create model of train_obj
-#   Validate with val_obj
+# Train ML models from prepped comparisons using CrcBiomeScreen package
+# 1. Define output directory and functions
+# 2. Load comparison_table.csv and define command line args
+# 3. Execute main function run_modelling() which runs:
+#     a. partition_training()
+#         * splits cohort object for training and internal validation
+#         * checks for sufficient training sample size (>= 20) and class balance
+#         * returns partitioned training object
+#     b. train_model()
+#         * enables/disables class weights
+#         * models partitioned training object using RF and XGBoost
+#         * saves as out_dir/models/[comparison]_model.rds
+#     c. validate_model()
+#         * filters for current validation rows from comparison_table
+#         * for each row, load validation objects from in_dir/final
+#         * externally validates trained objects using RF and XGBoost
+#         * saves as out_dir/final/[comparison]_evaluated.rds
+#     d. export_logs()
+#         * combines results from partition_training() and train_model() and save
+#           as out_dir/training_log/[comparison].csv
+#         * combines results from validate_model() and save as out_dir/validation_
+#           log/[comparison].csv
+
 
 # Load packages and dependencies -----------------------------------------------
 library(CrcBiomeScreen)
+library(dplyr)
 source("R/utils.R")
 
 
-# Define output directory ------------------------------------------------------
-in_dir <- "results/04_ml_processing"
-out_dir <- "results/05_ml"
+# Define input/output directories ----------------------------------------------
+in_dir <- "results/04_pre_ml"
+out_dir <- "results/05_ml_test"
 
 
 # Define helper functions ------------------------------------------------------
-#'
+# Split cohort object for training and internal validation, extract class
+# balance and class counts and check for sufficient sample size (>=20)
 partition_training <- function(
-    train_rds,
+    train_obj,
     partition_ratio = 0.7,
     partition_threshold = 20) {
   
-  message("\n Partitioning for training")
+  message("\nPartitioning for training")
   
-  obj <- train_rds$obj
-  meta <- train_rds$metadata
+  obj <- train_obj$obj
+  meta <- train_obj$metadata
 
   # Partition for internal validation
   suppressWarnings(  
@@ -87,7 +106,7 @@ partition_training <- function(
     partition = partition))
 }
 
-#'
+# Train partitioned object using RF and XGBoost, save as RDS and return object
 train_model <- function(
     train_obj,
     cfg) {
@@ -110,7 +129,7 @@ train_model <- function(
   
   # Skip if model already exists
   if (file.exists(mod_file)) {
-    message("\n Skipping model training")
+    message("\nSkipping model training")
     message("   > already exists at: ", mod_file)
     
     train_obj <- readRDS(mod_file)
@@ -118,7 +137,7 @@ train_model <- function(
     return(train_obj)
   }
   
-  message("\n Training partitioned subset")
+  message("\nTraining partitioned subset")
   
   # Extract cfg
   num_cores <- cfg$num_cores
@@ -236,14 +255,16 @@ train_model <- function(
   return(train_obj)
 }
   
-#'
+# Filter for current validation rows from comparison_table, load validation
+# object, externally validate trained object using RF and XGBoost, save as RDS 
+# and return final evaluated object
 validate_model <- function(
     train_obj,
     cfg,
     comparisons, 
     in_dir) {
   
-  message("\n Running external validation")
+  message("\nRunning external validation")
   
   # Define results path
   fin_dir <- file.path(out_dir, "final")
@@ -379,6 +400,35 @@ validate_model <- function(
   return(final_obj)
 }
   
+# Export training and validation results from final object and save as CSV
+export_logs <- function(final_obj, out_dir) {
+  
+  training_log <- file.path(out_dir, "training_log")
+  dir.create(training_log, recursive = TRUE, showWarnings = FALSE)
+  
+  validation_log <- file.path(out_dir, "validation_log")
+  dir.create(validation_log, recursive = TRUE, showWarnings = FALSE)
+  
+  train_name <- final_obj$metadata$comparison
+  
+  summary_df <- c(
+    final_obj$metadata,
+    final_obj$partition,
+    final_obj$training)
+  
+  summary_df <- as.data.frame(summary_df, stringsAsFactors = FALSE)
+  
+  write.csv(
+    summary_df,
+    file.path(training_log, paste0(train_name, ".csv")),
+    row.names = FALSE)
+  
+  write.csv(
+    final_obj$validation,
+    file.path(validation_log, paste0(train_name, ".csv")),
+    row.names = FALSE)
+}
+
 
 # Define main functions --------------------------------------------------------
 run_modelling <- function(
@@ -400,9 +450,9 @@ run_modelling <- function(
   comparisons <- comparison_table[comparison_table$train_name == train_name,]
   
   if (nrow(comparisons) == 0)
-    stop("   No comparisons found.")
+    stop("   > No comparisons found.")
   
-  message(" ", nrow(comparisons), " comparisons found")
+  message("   > ", nrow(comparisons), " comparisons found")
   
   # Partition train_obj
   train_obj <- partition_training(train_obj)
@@ -419,29 +469,9 @@ run_modelling <- function(
     in_dir = in_dir,
     cfg = cfg)
   
-  # Export results
-  training_log <- file.path(out_dir, "training_log")
-  dir.create(training_log, recursive = TRUE, showWarnings = FALSE)
-  
-  validation_log <- file.path(out_dir, "validation_log")
-  dir.create(validation_log, recursive = TRUE, showWarnings = FALSE)
-  
-  summary_df <- c(
-    final_obj$metadata,
-    final_obj$partition,
-    final_obj$training)
-  
-  summary_df <- as.data.frame(summary_df, stringsAsFactors = FALSE)
-  
-  write.csv(
-    summary_df,
-    file.path(training_log, paste0(train_name, ".csv")),
-    row.names = FALSE)
-  
-  write.csv(
-    final_obj$validation,
-    file.path(validation_log, paste0(train_name, ".csv")),
-    row.names = FALSE)
+  export_logs(
+    final_obj = final_obj,
+    out_dir = out_dir)
   
   return(final_obj)
 }
@@ -451,6 +481,10 @@ comparison_table <- read.csv(
   file.path(in_dir, "comparison_table.csv"),
   stringsAsFactors = FALSE)
 
+# For local testing
+file <- "results/04_pre_ml/final/FengQ_2015_adenoma_final.rds"
+
+# For Slurm
 # args <- commandArgs(trailingOnly = TRUE)
 # file <- args[1]
 # 
@@ -459,16 +493,6 @@ comparison_table <- read.csv(
 # }
 
 
-file <- "results/04_ml_processing/final/JieZ_2017_ACVD_final.rds"
-
 # Execute ----------------------------------------------------------------------
 modelling_res <- run_modelling(comparison_table, file, in_dir, out_dir)
-
-
-# Testing loop
-# files <- list.files("results/04_ml_processing/final", pattern = "_final\\.rds$", full.names = TRUE)
-
-# for (file in files) {
-#   run_modelling(comparison_table, file, out_dir)
-# }
 

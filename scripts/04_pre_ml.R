@@ -1,9 +1,26 @@
-# Normalise raw cohorts
-# Harmonise normalised cohorts
-# QC harmonised cohorts
-# Create unique comparisons and filter: each condition n = 30 at least
-# Create comparison_table for filtered cohorts
-# ML script: train and validate models via RunScreening
+# Prepare raw cohorts for ML training using CrcBiomeScreen package
+# 1. Define output directory and functions
+# 2. Load primary.RDS 
+# 3. Execute main function run_processing() which runs:
+#     a. normalise_cohorts()
+#         * normalises list of raw cohorts
+#         * saves as out_dir/raw_normalised/[cohort]_raw_normalised.rds
+#     b. harmonise_cohorts()
+#         * combines intersecting features of all normalised cohorts
+#         * sets empty features to 0
+#     c. qc_cohorts()
+#         * runs QC on normalised and harmonised cohorts
+#         * saves as out_dir/norm_processed/[cohort]_norm_processed.rds
+#     d. get_comparisons()
+#         * loops through cohorts for unique healthy x disease combinations
+#         * subsets QC processed cohorts by disease
+#         * checks for sufficient sample size (>= 30) and add binary labels
+#         * saves as out_dir/final/[comparison]_final.rds
+#         * lists file paths of _final.rds objects as out_dir/comparisons.txt
+#     e. create_comparison_table()
+#         * creates evaluation matrix of unique comparisons
+#         * extracts train/val metadata and create comparison_type tags
+#         * saves as out_dir/comparison_table.csv
 
 
 # Load packages and dependencies -----------------------------------------------
@@ -13,11 +30,11 @@ source("R/utils.R")
 
 
 # Define output directory ------------------------------------------------------
-out_dir <- "results/04_ml_processing"
+out_dir <- "results/04_pre_ml"
 
 
 # Define helper functions ------------------------------------------------------
-#'
+# Normalise list of raw cohorts, save as RDS and return objects
 normalise_cohorts <- function(
     cohort_list,
     out_dir,
@@ -88,7 +105,7 @@ normalise_cohorts <- function(
   return(norm_list)
 }
 
-
+# Harmonise features of normalised cohorts and return objects
 harmonise_cohorts <- function(
     norm_list,
     global_features) {
@@ -133,6 +150,7 @@ harmonise_cohorts <- function(
   return(harmonised_list)
 }
 
+# QC list of normalised and harmonised cohorts, save as RDS and return objects
 qc_cohorts <- function(
     harmonised_list,
     out_dir,
@@ -211,7 +229,10 @@ qc_cohorts <- function(
   
   return(qc_list)
 }
-     
+
+# Loop through QC-processed cohorts,  generate unique healthy x disease
+# combinations, check for sufficient sample size (>=30), add binary validation 
+# labels, save as RDS and return objects
 get_comparisons <- function(
     qc_list,
     condition_col = "study_condition",
@@ -246,8 +267,7 @@ get_comparisons <- function(
       n_disease <- sum(vals == disease, na.rm = TRUE)
       
       if (n_control < min_n || n_disease < min_n) {
-        message("   Skipping: ", comparison,
-                " (n_control=", n_control,
+        message("   Skipping: ", comparison, " (n_control=", n_control,
                 ", n_disease=", n_disease, ")")
         next
       }
@@ -299,6 +319,8 @@ get_comparisons <- function(
   return(comparison_list)
 }
 
+# Create evaluation matrix using unique comparisons, extract train/val cohort 
+# metadata, add comparison_type tags and save as CSV
 create_comparison_table <- function(
     comparison_list,
     out_dir) {
