@@ -1,8 +1,9 @@
 # Utility functions for reading, writing and processing curatedMetagenomicData cohorts
 
-# Load packages and dependencies -----------------------------------------------
-library(curatedMetagenomicData)
-library(SummarizedExperiment)
+# # Load packages and dependencies -----------------------------------------------
+# library(curatedMetagenomicData)
+# library(SummarizedExperiment)
+# library(dplyr)
 
 
 # Reading and writing ----------------------------------------------------------
@@ -126,63 +127,9 @@ validate_conditions <- function(info, cohort_name) {
 }
 
 
-#' Get computing configuration
-get_config <- function() {
-  
-  is_slurm <- nzchar(Sys.getenv("SLURM_JOB_ID"))
-  
-  if (is_slurm) {
-    cfg <- list(
-      num_cores = as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "1")),
-      n_cv = 10,
-      mode = "slurm")
-    message("\nConfiguration: Slurm (num_cores = ", 
-            cfg$num_cores, " | n_cv = ", cfg$n_cv, ")")
 
-  } else {
-    cfg <- list(
-      num_cores = 1,
-      n_cv = 2,
-      mode = "local")
-    message("\nConfiguration: local (num_cores = ", 
-            cfg$num_cores, " | n_cv = ", cfg$n_cv, ")")
-    
-  }
-  return(cfg)
-}
 
-#' Extract AUC from CrcBiomeScreenObject
-extract_auc <- function(auc_val) {
-  auc <- suppressWarnings(as.numeric(sub(".*: ", "", auc_val)))
-  if (is.na(auc))
-    auc <- NA_real_
-  
-  message("   AUC = ", auc)
-  
-  auc
-}
 
-#' Compile individual log csvs from array outputs
-compile_logs <- function(
-    log_dir,
-    file_name) {
-  
-  files <- list.files(
-    log_dir, 
-    pattern = "\\.csv$", 
-    full.names = TRUE)
-  
-  # Exclude output file
-  files <- files[basename(files) != file_name]
-  
-  combined_df <- bind_rows(lapply(files, read_csv, show_col_types = FALSE))
-  
-  write_csv(combined_df, file.path(log_dir, file_name))
-  
-  message("\nCombined logs written to: ", file.path(log_dir))
-  
-  return(combined_df)
-}
 
 
 read_rds_files <- function(file_dir) {

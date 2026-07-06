@@ -349,6 +349,7 @@ validate_model <- function(
             model_type = "RF",
             TaskName = paste0(val_name),
             TrueLabel = "disease",
+            condition_col = "validation_condition",
             PlotAUC = FALSE)
           
         }, error = function(e) {
@@ -381,6 +382,7 @@ validate_model <- function(
             model_type = "XGBoost",
             TaskName = paste0(val_name),
             TrueLabel = "disease",
+            condition_col = "validation_condition",
             PlotAUC = FALSE)
           
         }, error = function(e) {
@@ -405,7 +407,7 @@ validate_model <- function(
     
     message("")
     
-    # Extract metrics (optional but recommended)
+    # Extract metrics
     validation[[i]] <- data.frame(
       train_name = meta$comparison,
       train_cohort = meta$cohort,
