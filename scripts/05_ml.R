@@ -2,20 +2,24 @@
 # 1. Define output directory and functions
 # 2. Load comparison_table.csv and define command line args
 # 3. Execute main function run_modelling() which runs:
-#     a. partition_training()
+#     a. get_configuration()
+#         * returns num_cores and n_cv according to computing configuration
+#     b. partition_training()
 #         * splits cohort object for training and internal validation
 #         * checks for sufficient training sample size (>= 20) and class balance
 #         * returns partitioned training object
-#     b. train_model()
+#     c. train_model() 
 #         * enables/disables class weights
 #         * models partitioned training object using RF and XGBoost
+#         * runs extract_auc() and prints values
 #         * saves as out_dir/models/[comparison]_model.rds
-#     c. validate_model()
+#     d. validate_model() 
 #         * filters for current validation rows from comparison_table
 #         * for each row, load validation objects from in_dir/final
 #         * externally validates trained objects using RF and XGBoost
+#         * runs extract_auc() and prints values
 #         * saves as out_dir/final/[comparison]_evaluated.rds
-#     d. export_logs()
+#     e. export_logs()
 #         * combines results from partition_training() and train_model() and save
 #           as out_dir/training_log/[comparison].csv
 #         * combines results from validate_model() and save as out_dir/validation_
@@ -34,6 +38,31 @@ out_dir <- "results/05_ml_test"
 
 
 # Define helper functions ------------------------------------------------------
+# Get computing configuration and return num_cores and n_cv
+get_configuration <- function() {
+  
+  is_slurm <- nzchar(Sys.getenv("SLURM_JOB_ID"))
+  
+  if (is_slurm) {
+    cfg <- list(
+      num_cores = as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "1")),
+      n_cv = 10,
+      mode = "slurm")
+    message("\nConfiguration: Slurm (num_cores = ", 
+            cfg$num_cores, " | n_cv = ", cfg$n_cv, ")")
+    
+  } else {
+    cfg <- list(
+      num_cores = 1,
+      n_cv = 2,
+      mode = "local")
+    message("\nConfiguration: local (num_cores = ", 
+            cfg$num_cores, " | n_cv = ", cfg$n_cv, ")")
+    
+  }
+  return(cfg)
+}
+
 # Split cohort object for training and internal validation, extract class
 # balance and class counts and check for sufficient sample size (>=20)
 partition_training <- function(
@@ -104,6 +133,16 @@ partition_training <- function(
     obj = obj,
     metadata = meta,
     partition = partition))
+}
+
+# Extract, print and return numeric AUC value from trained/validated object
+extract_auc <- function(auc_val) {
+  
+  auc <- suppressWarnings(as.numeric(sub(".*: ", "", auc_val)))
+  if (is.na(auc))
+    auc <- NA_real_
+  message("   AUC = ", auc)
+  auc
 }
 
 # Train partitioned object using RF and XGBoost, save as RDS and return object
@@ -437,7 +476,7 @@ run_modelling <- function(
     in_dir,
     out_dir) {
   
-  cfg <- get_config()
+  cfg <- get_configuration()
   
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   
