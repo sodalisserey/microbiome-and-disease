@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=ml_train
-#SBATCH --time=06:00:00
+#SBATCH --time=10:00:00
 #SBATCH --mem=25G
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -18,7 +18,7 @@ module load miniforge
 conda activate r_env
 
 BASE_DIR=/mnt/scratch/qvsg0202/microbiome-and-disease
-IN_DIR=BASE_DIR/results/04_pre_ml
+IN_DIR="$BASE_DIR/results/04_pre_ml"
 
 mkdir -p "$BASE_DIR/slurm/jobs"
 

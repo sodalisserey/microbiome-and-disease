@@ -34,7 +34,7 @@ source("R/utils.R")
 
 # Define input/output directories ----------------------------------------------
 in_dir <- "results/04_pre_ml"
-out_dir <- "results/05_ml_test"
+out_dir <- "results/05_ml"
 
 
 # Define helper functions ------------------------------------------------------
@@ -523,7 +523,8 @@ comparison_table <- read.csv(
   stringsAsFactors = FALSE)
 
 # For local testing
-file <- "results/04_pre_ml/final/FengQ_2015_adenoma_final.rds"
+# file <- "results/04_pre_ml/final/FengQ_2015_adenoma_final.rds"
+file_list <- readLines("results/04_pre_ml/comparisons.txt")
 
 # For Slurm
 # args <- commandArgs(trailingOnly = TRUE)
@@ -535,5 +536,8 @@ file <- "results/04_pre_ml/final/FengQ_2015_adenoma_final.rds"
 
 
 # Execute ----------------------------------------------------------------------
-modelling_res <- run_modelling(comparison_table, file, in_dir, out_dir)
+for (file in file_list) {
+  modelling_res <- run_modelling(comparison_table, file, in_dir, out_dir)
+}
 
+test <- readRDS("results/05_ml/final/FengQ_2015_adenoma_evaluated.rds")
