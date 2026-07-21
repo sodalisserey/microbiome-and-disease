@@ -1,24 +1,75 @@
-# PERMANOVA analysis using vegan package
+# Perform PERMANOVA analysis using vegan package
 # 1. Define output directory and functions
 # 2. Load data using utils.R
-# 3. Execute main function: run_analysis()
+# 3. Execute main function: run_bray_curtis()
 #   * Clean, extract disease and validate conditions
-#   * Execute run_permanova() and log_permanova()
-#   * Export permanova_res as out_dir/[cohort_name]_plot.pdf
+#   * Execute calculate_beta_diversity() and log_beta_diversity()
+#   * Export bray_res as out_dir/[cohort_name]_plot.pdf
 
 
 # Load packages and dependencies -----------------------------------------------
 library(vegan)
+library(ggplot2)
+library(readr)
+library(SummarizedExperiment)
 source("R/utils.R")
 
 # Define output directory ------------------------------------------------------
-out_dir <- "results/01_permanova"
-library(readr)
+out_dir <- "results/01_bray"
 
 
 # Define helper functions ------------------------------------------------------
-#' Run PERMANOVA on a single cohort and save plot
-run_permanova <- function(
+# TODO flesh this out if timing permits
+# calculate_alpha_diversity <- function(
+#     cohort,
+#     cohort_name,
+#     condition_col = "study_condition") {
+#   
+#   # Extract abundance matrix
+#   abund <- as.matrix(assay(cohort))
+#   
+#   # Extract metadata
+#   meta <- as.data.frame(colData(cohort))
+#   
+#   # Ensure sample IDs are available
+#   if (is.null(rownames(meta))) {
+#     rownames(meta) <- colnames(cohort)
+#   }
+#   
+#   # Match samples
+#   common_samples <- intersect(colnames(abund), rownames(meta))
+#   
+#   if (length(common_samples) < 3) {
+#     stop("Too few samples")
+#   }
+#   
+#   abund <- abund[, common_samples, drop = FALSE]
+#   meta <- meta[common_samples, , drop = FALSE]
+#   
+#   # Convert to relative abundance
+#   abund_rel <- sweep(
+#     abund,
+#     2,
+#     colSums(abund),
+#     "/")
+#   
+#   # Shannon diversity
+#   shannon <- diversity(
+#     t(abund_rel),
+#     index = "shannon")
+#   
+#   # Return results
+#   data.frame(
+#     sample = names(shannon),
+#     cohort = cohort_name,
+#     shannon = shannon,
+#     condition = meta[[condition_col]],
+#     stringsAsFactors = FALSE)
+# }
+
+
+# Calculate beta-diversity, run PERMANOVA and save plot
+calculate_beta_diversity <- function(
     cohort,
     cohort_name,
     condition_col = "study_condition",
@@ -58,18 +109,24 @@ run_permanova <- function(
     abund <- abund[, common_samples, drop = FALSE]
     meta  <- meta[common_samples, , drop = FALSE]
     
-    # Distance
+    message(" > Computing Bray-Curtis dissimilarity")
     X <- t(abund)
     bray <- vegdist(X, method = "bray")
     
-    # PERMANOVA
+    message(" > Running PERMANOVA")
     meta[[condition_col]] <- as.factor(meta[[condition_col]])
     
     ad <- adonis2(
       bray ~ meta[[condition_col]],
       permutations = permutations)
     
-    # Dispersion
+    message(" > Checking homogeneity of dispersion")
+    meta[[condition_col]] <- factor(
+      meta[[condition_col]],
+      levels = c(
+        "control",
+        setdiff(unique(meta[[condition_col]]), "control")))
+    
     bd <- betadisper(bray, meta[[condition_col]])
     bd_test <- permutest(bd, permutations = dispersion_permutations)
     
@@ -77,8 +134,7 @@ run_permanova <- function(
       adonis = ad,
       betadisper = bd,
       dispersion_test = bd_test,
-      meta = meta
-    )
+      meta = meta)
     
   }, warning = function(w) {
     warnings_list <<- c(warnings_list, w$message)
@@ -91,11 +147,54 @@ run_permanova <- function(
   
   pdf(
     file.path(plot_dir, paste0(cohort_name, "_plot.pdf")),
-    width = 8,
-    height = 6)
+    width = 6,
+    height = 5)
+
+  # Extract eigenvalues
+  eig <- bd$eig
+  eig_pos <- eig[eig > 0]
+  pc_var <- eig_pos / sum(eig_pos) * 100
+
+  condition_levels <- levels(meta[[condition_col]])
   
-  bd <- betadisper(bray, meta[[condition_col]])
-  plot(bd, main = cohort_name)
+  my_colours <- setNames(
+    colorRampPalette(
+      c("#777C3C",
+        "#896C74",
+        "#DDA303",
+        "#419F9B",
+        "#B4632D")
+    )(length(condition_levels)),
+    condition_levels)
+  
+  plot(
+    bd,
+    main = cohort_name,
+    cex.main = 1.5,
+    xlab = paste0("PCoA1 (", round(pc_var[1], 1), "%)"),
+    ylab = paste0("PCoA2 (", round(pc_var[2], 1), "%)"),
+    col = my_colours[levels(bd$group)],
+    seg.col = "grey80",
+    hull = FALSE,
+    ellipse = TRUE,
+    bty = "l",
+    cex.lab = 1.5,
+    cex.axis = 1.5,
+    cex = 1.5)
+  
+  r2 <- round(ad$R2[1], 3)
+  p_value <- ad$`Pr(>F)`[1]
+  
+  text(
+    x = par("usr")[2] - 0.05 * diff(par("usr")[1:2]),
+    y = par("usr")[3] + 0.05 * diff(par("usr")[3:4]),
+    labels = paste0(
+      "R² = ", r2,
+      "\np = ", signif(p_value, 3)),
+    adj = c(0, 1),
+    cex = 1.3)
+  
+  message(" > Plots saved to: ", plot_dir)
   
   dev.off()
   
@@ -106,13 +205,13 @@ run_permanova <- function(
   )
 }
 
-#' Log PERMANOVA results and append to permanova_res()
-log_permanova <- function(
+#' Log PERMANOVA results and append to bray_res()
+log_beta_diversity <- function(
     cohort_name,
     conditions,
     n_disease,
     result,
-    permanova_res) {
+    bray_res) {
   
   # If no results
   if (is.null(result$result)) {
@@ -134,8 +233,8 @@ log_permanova <- function(
       } else NA,
       stringsAsFactors = FALSE)
     
-    permanova_res[[cohort_name]] <- row
-    return(permanova_res)
+    bray_res[[cohort_name]] <- row
+    return(bray_res)
   }
   
   # If success
@@ -172,29 +271,29 @@ log_permanova <- function(
     stringsAsFactors = FALSE
   )
   
-  permanova_res[[cohort_name]] <- row
+  bray_res[[cohort_name]] <- row
   
-  return(permanova_res)
+  return(bray_res)
 }
 
 #' Export PERMANOVA results by saving as CSV
-export_analysis <- function(permanova_res, out_dir) {
+export_analysis <- function(bray_res, out_dir) {
   
   dir.create("results", recursive = TRUE, showWarnings = FALSE)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   
   # Bind log
-  permanova_df <- dplyr::bind_rows(permanova_res)
+  permanova_df <- dplyr::bind_rows(bray_res)
   
   # Save CSV
-  write_csv(permanova_df, file.path(out_dir, "permanova_results.csv"))
+  write_csv(permanova_df, file.path(out_dir, "bray_results.csv"))
 }
 
 
 # Define main function ---------------------------------------------------------
-run_analysis <- function(cohorts, out_dir) {
+run_bray_curtis <- function(cohorts, out_dir) {
   
-  permanova_res <- list()
+  bray_res <- list()
   
   for (cohort_name in names(cohorts)) {
     
@@ -205,43 +304,41 @@ run_analysis <- function(cohorts, out_dir) {
     condition_invalid <- validate_conditions(info, cohort_name)
     
     if (!is.null(condition_invalid)) {
-      permanova_res <- log_permanova(
+      bray_res <- log_beta_diversity(
         cohort_name = cohort_name,
         conditions = NA_character_,
         n_disease = NA_character_,
         result = NULL,
-        permanova_res = permanova_res)
+        bray_res = bray_res)
       
       next
     }
     
-    message("\nRunning PERMANOVA for cohort: ", cohort_name)
+    message("\nCalculating beta-diversity for cohort: ", cohort_name)
     
-    # Run PERMANOVA on filtered cohort
-    result <- run_permanova(
+    # Calculate beta-diversity for filtered cohort
+    result <- calculate_beta_diversity(
       cohort = info$cohort, 
       cohort_name = cohort_name,
       out_dir = out_dir)
     
-    message("   Logging results")
-    
     conditions = paste(unique(info$conditions), collapse = ", ")
     
     # Log results
-    permanova_res <- log_permanova(
+    bray_res <- log_beta_diversity(
       cohort_name = cohort_name,
       conditions = conditions,
       n_disease = info$n_disease,
       result = result,
-      permanova_res = permanova_res)
+      bray_res = bray_res)
   }
   
   message("\nExporting analysis results")
   
-  export_analysis(permanova_res, out_dir)
+  export_analysis(bray_res, out_dir)
   message("Done. Results written to: ", out_dir)
   
-  return(permanova_res)
+  return(bray_res)
 }
   
     
@@ -250,6 +347,6 @@ primary_cohorts <- readRDS("data/primary.rds")
 
 
 # Execute ----------------------------------------------------------------------
-results <- run_analysis(primary_cohorts, out_dir)
+bray_res <- run_bray_curtis(primary_cohorts, out_dir)
 
 
