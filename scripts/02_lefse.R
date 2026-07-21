@@ -4,13 +4,13 @@
 # 3. Execute main functions:
 #   a. run_analysis()
 #     * Clean, extract disease and validate conditions
-#     * ANALYSIS BRANCH 1 (healthy x 1 disease) -> analysis_pipeline() executes:
+#     * ANALYSIS BRANCH 1 (control x 1 disease) -> analysis_pipeline() executes:
 #           - qc_cohort() 
 #           - lefse_analyse() 
 #           - log_qc()
 #           - log_analysis()
 #           - log_result()
-#     * ANALYSIS BRANCH 2 (healthy x >1 disease)  -> 
+#     * ANALYSIS BRANCH 2 (control x >1 disease)  -> 
 #           - Create pair-wise subsets
 #           - Execute analysis_pipeline()
 #   b. export_analysis()
@@ -22,6 +22,7 @@
 # TODO filter by sample size before analysis
 # TODO compile contingency table and QC into one output
 # TODO update documentation after combining with lefse_plot.R
+# TODO conduct at genus level instead of species
 
 # Load packages and dependencies -----------------------------------------------
 library(curatedMetagenomicData)
@@ -38,8 +39,8 @@ out_dir <- "results/02_lefse"
 
 
 # Define analysis functions ----------------------------------------------------
-#' Run QC on a cohort and return a contingency table, class imbalance and 
-#' age imbalance ratios and counts
+# Run QC on a cohort and return a contingency table, class imbalance and 
+# age imbalance ratios and counts
 qc_cohort <- function(
     cohort,
     cohort_name,
@@ -152,14 +153,14 @@ qc_cohort <- function(
   return(result)
 }
 
-#' Analyse a cohort by performing:
-#' - Terminal node filtering
-#' - Relative abundance transformation
-#' - Subclass stratification only if:
-#'    * age_category exists
-#'    * at least 2 age groups are present
-#'    * all age groups contain both healthy and disease samples
-#' - LEfSe differential abundance analysis
+# Analyse a cohort by performing:
+# - Terminal node filtering
+# - Relative abundance transformation
+# - Subclass stratification only if:
+#    * age_category exists
+#    * at least 2 age groups are present
+#    * all age groups contain both control and disease samples
+# - LEfSe differential abundance analysis
 lefse_analyse <- function(
     cohort,
     comparison = NULL,
@@ -190,7 +191,7 @@ lefse_analyse <- function(
       
     } else {
       
-      ## and each age group has both healthy x disease samples
+      ## and each age group has both control x disease samples
       valid_strata <- apply(age_tab, 1, function(x) all(x > 0))
       
       if (all(valid_strata)) {
@@ -211,6 +212,35 @@ lefse_analyse <- function(
   # Filter terminal node 
   tn <- get_terminal_nodes(rownames(cohort))
   cohort <- cohort[tn, , drop = FALSE]
+  
+  # Aggregate species to genus
+  abund <- SummarizedExperiment::assay(cohort)
+  
+  genus <- sub(".*\\|g__", "g__", rownames(abund))
+  genus <- sub("\\|.*", "", genus)
+  
+  keep <- grepl("^g__", genus)
+  
+  abund <- abund[keep, , drop = FALSE]
+  genus <- genus[keep]
+  
+  if (nrow(abund) == 0) {
+    message("ERROR: no genus-level features found")
+    return(NULL)
+  }
+  
+  abund_genus <- rowsum(
+    abund,
+    group = genus)
+  
+  # Rebuild object
+  cohort <- SummarizedExperiment::SummarizedExperiment(
+    assays = list(abundance = abund_genus),
+    colData = meta)
+  
+  message(
+    "After genus aggregation: features = ",
+    nrow(cohort))
   
   # Transform relative abundance
   cohort <- relativeAb(cohort)
@@ -424,20 +454,29 @@ analysis_pipeline <- function(
 
 
 # Define plotting functions ----------------------------------------------------
-#' Extract species label from full clade string
-extract_species <- function(df) {
+# Extract species label from full clade string
+extract_taxon <- function(df, rank = c("genus", "species", "family")) {
+  
+  rank <- match.arg(rank)
+  
+  prefixes <- c(
+    species = "s__",
+    genus   = "g__",
+    family  = "f__")
+  
+  prefix <- prefixes[[rank]]
+  
   df %>%
     dplyr::mutate(
-      species = dplyr::case_when(
-        stringr::str_detect(features, "s__") ~ sub(".*s__", "s__", features),
-        stringr::str_detect(features, "g__") ~ sub(".*g__", "g__", features),
-        stringr::str_detect(features, "f__") ~ sub(".*f__", "f__", features),
-        TRUE ~ features),
-      
-      species = sub("\\|.*", "", species),
-      species = sub("^[a-z]__", "", species),
-      species = gsub("_", " ", species),
-      species = sub("^species:", "", species))
+      taxon = dplyr::case_when(
+        stringr::str_detect(features, prefix) ~
+          sub(paste0(".*", prefix), prefix, features),
+        TRUE ~ features
+      ),
+      taxon = sub("\\|.*", "", taxon),
+      taxon = sub("^[a-z]__", "", taxon),
+      taxon = gsub("_", " ", taxon),
+      taxon = sub("^[A-Za-z]+:", "", taxon))
 }
 
 #' Convert disease label string with underscores to title case
@@ -454,11 +493,11 @@ convert_smart_case <- function(x) {
   paste(words, collapse = " ")
 }
 
-#' Prepare LEfSe plot data by filtering scores and assigning healthy/disease label
+#' Prepare LEfSe plot data by filtering scores and assigning control/disease label
 process_scores <- function(
     lefse_res_df,
     disease_label,
-    healthy_label,
+    control_label,
     max_features) {
   
   lefse_res_df %>%
@@ -473,11 +512,11 @@ process_scores <- function(
       group_label = ifelse(
         scores > 0,
         disease_label,
-        healthy_label),
+        control_label),
       
       group_label = factor(
         group_label,
-        levels = c(healthy_label, disease_label)))
+        levels = c(control_label, disease_label)))
 }
 
 #' Log plotting status and number of features
@@ -517,7 +556,7 @@ log_plot <- function(
   }
   
   disease_label <- convert_smart_case(unique(lefse_res_df$disease)[1])
-  healthy_label <- "Healthy"
+  control_label <- "Control"
   
   # Case 2: too few features
   if (n_features_raw < min_features) {
@@ -534,7 +573,7 @@ log_plot <- function(
   df_plot <- process_scores(
     lefse_res_df,
     disease_label,
-    healthy_label,
+    control_label,
     max_features
   )
   
@@ -562,61 +601,65 @@ log_plot <- function(
   )
 }
 
-#' Build a LEfSe bar plot using ggplot2
+# Build a LEfSe bar plot using ggplot2
 create_plot <- function(
     lefse_res_df,
     cohort_name,
     disease_label,
-    healthy_label) {
+    control_label) {
   
-  ggplot2::ggplot(
+  ggplot(
     lefse_res_df,
-    ggplot2::aes(
+    aes(
       x = scores,
-      y = stats::reorder(species, scores, FUN = mean),
+      y = stats::reorder(taxon, scores, FUN = mean),
       fill = group_label)) +
     
-    ggplot2::geom_col(
+    geom_col(
       width = 0.7,
       colour = "white",
       linewidth = 0.2) +
     
-    ggplot2::geom_vline(
+    geom_vline(
       xintercept = 0,
       linewidth = 0.4,
       colour = "grey40") +
     
-    ggplot2::scale_fill_manual(
+    scale_fill_manual(
       values = c(
-        setNames("#c5cb93ff", healthy_label),
+        setNames("#c5cb93ff", control_label),
         setNames("#dfa57eff", disease_label)),
-      
+      labels = c(
+        setNames("control", control_label),
+        setNames("case", disease_label)),
       name = "Enriched in") +
     
-    ggplot2::scale_x_continuous(
-      expand = ggplot2::expansion(mult = c(0.05, 0.05))) +
+    scale_x_continuous(
+      expand = expansion(mult = c(0.05, 0.05))) +
     
-    ggplot2::theme_minimal(base_size = 14) +
-    ggplot2::theme(
-      plot.title = ggplot2::element_text(
+    theme_minimal(base_size = 14) +
+    theme(
+      plot.title = element_text(
         face = "bold",
         size = 14,
         hjust = 0.5),
       
-      axis.text.y = ggplot2::element_text(
+      axis.text.y = element_text(
         size = 14,
         face = "italic"),
       
       # TODO legend text size increase
       legend.position = "bottom",
-      panel.grid.major.y = ggplot2::element_blank(),
-      panel.grid.minor = ggplot2::element_blank()) +
+      legend.title = element_text(size = 14),
+      legend.text = element_text(size = 14),
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor = element_blank()) +
     
-    ggplot2::labs(
+    labs(
       title = paste0(
         cohort_name,
         " (",
-        healthy_label,
+        control_label,
         " vs ",
         disease_label,
         ")"
@@ -625,7 +668,7 @@ create_plot <- function(
       y = NULL)
 }
 
-#' Save a single plot as a pdf
+# Save a single plot as a pdf
 save_plot <- function(
     plot,
     comparison,
@@ -638,12 +681,12 @@ save_plot <- function(
     out_dir,
     paste0(safe_comp, ".pdf"))
   
-  plot_height <- max(4, n_features * 0.35 + 1.5)
+  plot_height <- max(2.5, n_features * 0.25 + 1.5)
   
-  ggplot2::ggsave(
+  ggsave(
     filename = out_path,
     plot = plot,
-    width = 9,
+    width = 7,
     height = plot_height,
     device = "pdf")
   
@@ -663,7 +706,7 @@ run_analysis <- function(primary_cohorts, out_dir) {
     cohort <- primary_cohorts[[cohort_name]]
     info <- process_conditions(cohort)
     
-    # Check cohort contains both healthy and disease samples
+    # Check cohort contains both control and disease samples
     condition_invalid <- validate_conditions(info, cohort_name)
     
     if (!is.null(condition_invalid)) {
@@ -676,13 +719,13 @@ run_analysis <- function(primary_cohorts, out_dir) {
         analysis_res = analysis_res)
       next
       
-    # ANALYSIS BRANCH 1: healthy x 1 disease
+    # ANALYSIS BRANCH 1: control x 1 disease
     } else if (info$n_diseases == 1) {
       
       disease = info$diseases
       
       comparison_name <- paste(cohort_name, disease, sep = "_")
-      message("\n", cohort_name, ": healthy vs ", info$diseases)
+      message("\n", cohort_name, ": control vs ", info$diseases)
       
       analysis_res <- analysis_pipeline(
         cohort = cohort,
@@ -691,16 +734,16 @@ run_analysis <- function(primary_cohorts, out_dir) {
         comparison_name = comparison_name,
         analysis_res = analysis_res)
       
-    # ANALYSIS BRANCH 2: healthy x >1 disease
+    # ANALYSIS BRANCH 2: control x >1 disease
     } else {
       
-      message("\n", cohort_name, ": healthy vs ", info$n_diseases, " diseases")
+      message("\n", cohort_name, ": control vs ", info$n_diseases, " diseases")
       
       for (disease in info$diseases) {
         
-        message("\n", cohort_name, " subset: healthy vs ", disease)
+        message("\n", cohort_name, " subset: control vs ", disease)
         
-        # Subset cohort for healthy x 1 disease
+        # Subset cohort for control x 1 disease
         meta <- as.data.frame(colData(cohort))
         keep <- meta$study_condition %in% c("control", disease)
         cohort_subset <- cohort[, keep]
@@ -737,12 +780,12 @@ run_analysis <- function(primary_cohorts, out_dir) {
   
   # Write CSVs
   write_csvs(
-    out_dir,
-    list(
+    data_list = list(
       lefse_results = analysis_res$lefse_df,
       contingency_tables = analysis_res$contingency_df,
       qc_summary = analysis_res$qc_summary,
-      analysis_log = analysis_res$analysis_log))
+      analysis_log = analysis_res$analysis_log),
+    out_dir = out_dir)
   
   return(analysis_res)
 }
@@ -759,7 +802,7 @@ run_plotting <- function(
   
   lefse_res <- analysis_res$lefse_df
   
-  lefse_res <- extract_species(lefse_res)
+  lefse_res <- extract_taxon(lefse_res, rank = "genus")
   
   plot_log <- lapply(
     unique(lefse_res$comparison),
@@ -786,22 +829,19 @@ run_plotting <- function(
           res$df_plot,
           cohort_name,
           disease_label,
-          "Healthy"
-        )
+          "Control")
         
         save_plot(
           p,
           comp,
           plot_dir,
-          nrow(res$df_plot)
-        )
+          nrow(res$df_plot))
         
         res$log$status <- "PLOTTED"
       }
       
       res$log
-    }
-  )
+    })
   
   plot_log_df <- bind_rows(plot_log)
   
