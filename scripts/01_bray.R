@@ -10,6 +10,7 @@
 # Load packages and dependencies -----------------------------------------------
 library(vegan)
 library(ggplot2)
+library(dplyr)
 library(readr)
 library(SummarizedExperiment)
 source("R/utils.R")
@@ -144,17 +145,13 @@ calculate_beta_diversity <- function(
     error_msg <<- e$message
     return(NULL)
   })
-  
-  pdf(
-    file.path(plot_dir, paste0(cohort_name, "_plot.pdf")),
-    width = 6,
-    height = 5)
 
   # Extract eigenvalues
   eig <- bd$eig
   eig_pos <- eig[eig > 0]
   pc_var <- eig_pos / sum(eig_pos) * 100
-
+  
+  # Plot
   condition_levels <- levels(meta[[condition_col]])
   
   my_colours <- setNames(
@@ -167,36 +164,92 @@ calculate_beta_diversity <- function(
     )(length(condition_levels)),
     condition_levels)
   
-  plot(
-    bd,
-    main = cohort_name,
-    cex.main = 1.5,
-    xlab = paste0("PCoA1 (", round(pc_var[1], 1), "%)"),
-    ylab = paste0("PCoA2 (", round(pc_var[2], 1), "%)"),
-    col = my_colours[levels(bd$group)],
-    seg.col = "grey80",
-    hull = FALSE,
-    ellipse = TRUE,
-    bty = "l",
-    cex.lab = 1.5,
-    cex.axis = 1.5,
-    cex = 1.5)
+  # Sample coordinates
+  scores_sites <- as.data.frame(scores(bd, display = "sites"))
+  scores_sites$group <- bd$group
   
-  r2 <- round(ad$R2[1], 3)
-  p_value <- ad$`Pr(>F)`[1]
+  # Group centroids
+  scores_centroids <- as.data.frame(scores(bd, display = "centroids"))
+  scores_centroids$group <- rownames(scores_centroids)
   
-  text(
-    x = par("usr")[2] - 0.05 * diff(par("usr")[1:2]),
-    y = par("usr")[3] + 0.05 * diff(par("usr")[3:4]),
-    labels = paste0(
-      "R² = ", r2,
-      "\np = ", signif(p_value, 3)),
-    adj = c(0, 1),
-    cex = 1.3)
+  colnames(scores_centroids)[1:2] <- c("Centroid1", "Centroid2")
+  
+  # Join centroid coordinates to each sample
+  plot_df <- scores_sites %>%
+    left_join(
+      scores_centroids,
+      by = "group"
+    ) %>%
+    mutate(
+      group = recode(
+        group,
+        TKI_dependent_diarrhoea = "TKI_diarrhoea"
+      )
+      # For report only
+      , group = ifelse(group == "control", "Control", "Case")
+    )
+  
+  # For report only
+  my_colours <- c(
+    Control = "#777C3C",
+    Case = "#B4632D")
+
+  p <- ggplot(plot_df, aes(PCoA1, PCoA2, colour = group)) +
+    
+    # segments to centroids
+    geom_segment(
+      aes(
+        xend = Centroid1,
+        yend = Centroid2
+      ),
+      colour = "grey80",
+      linewidth = 0.4
+    ) +
+    
+    # confidence ellipses
+    stat_ellipse(
+      aes(fill = group),
+      geom = "polygon",
+      alpha = 0.15,
+      colour = NA,
+      show.legend = FALSE
+    ) +
+
+    scale_colour_manual(values = my_colours) +
+    scale_fill_manual(values = my_colours)+
+    
+    # samples
+    geom_point(size = 1.5) +
+    
+    labs(
+      title = cohort_name,
+      x = paste0("PCoA1 (", round(pc_var[1], 1), "%)"),
+      y = paste0("PCoA2 (", round(pc_var[2], 1), "%)"),
+      colour = "Condition",
+      fill = "Condition") +
+    
+    coord_fixed(ratio = 1) +
+    theme_classic(base_size = 16) +
+    theme(
+      aspect.ratio = 1,
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      axis.text = element_text(size = 16),
+      axis.title = element_text(size = 16),
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 8)
+    )
+  
+  ggsave(
+    file.path(
+      plot_dir,
+      paste0(cohort_name, "_pcoa.pdf")),
+    plot = p,
+    width = 3,
+    height = 4,
+    units = "in")
   
   message(" > Plots saved to: ", plot_dir)
-  
-  dev.off()
   
   list(
     result = result,
@@ -213,6 +266,8 @@ log_beta_diversity <- function(
     result,
     bray_res) {
   
+  n_status_thresh = 0
+  
   # If no results
   if (is.null(result$result)) {
     
@@ -225,6 +280,7 @@ log_beta_diversity <- function(
       p_value = NA_real_,
       dispersion_p = NA_real_,
       n = NA_integer_,
+      n_status = NA_character_,
       warnings = if (!is.null(result$warnings)) {
         paste(result$warnings, collapse = " | ")
       } else NA,
@@ -253,8 +309,43 @@ log_beta_diversity <- function(
     disp_p <- bd_test$tab$`Pr(>F)`[1]
   }
   
-  n_samples <- if (!is.null(res$meta)) nrow(res$meta) else NA_integer_
-
+  meta <- res$meta
+  n_samples <- if (!is.null(meta)) nrow(meta) else NA_integer_
+  
+  n_status <- NA_character_
+  
+  if (!is.null(meta) && "study_condition" %in% colnames(meta)) {
+    
+    counts <- table(meta[["study_condition"]])
+    
+    n_status <- character()
+    
+    if ("control" %in% names(counts) &&
+        counts[["control"]] < n_status_thresh) {
+      n_status <- c(
+        n_status,
+        paste0("n control < ", n_status_thresh)
+      )
+    }
+    
+    disease_groups <- setdiff(names(counts), "control")
+    
+    for (d in disease_groups) {
+      if (counts[[d]] < n_status_thresh) {
+        n_status <- c(
+          n_status,
+          paste0("n ", d, " < ", n_status_thresh)
+        )
+      }
+    }
+    
+    if (length(n_status) == 0) {
+      n_status <- NA_character_
+    } else {
+      n_status <- paste(n_status, collapse = " | ")
+    }
+  }
+  
   row <- data.frame(
     cohort_name = cohort_name,
     conditions = conditions,
@@ -264,6 +355,7 @@ log_beta_diversity <- function(
     p_value = p_value,
     dispersion_p = disp_p,
     n = n_samples,
+    n_status = n_status,
     warnings = if (!is.null(result$warnings)) {
       paste(result$warnings, collapse = " | ")
     } else NA,
@@ -344,7 +436,7 @@ run_bray_curtis <- function(cohorts, out_dir) {
     
 # Load data --------------------------------------------------------------------
 primary_cohorts <- readRDS("data/primary.rds") 
-
+primary_cohorts <- primary_cohorts[c("GuptaA_2019", "KieserS_2018", "IjazUZ_2017", "IaniroG_2022")]
 
 # Execute ----------------------------------------------------------------------
 bray_res <- run_bray_curtis(primary_cohorts, out_dir)
