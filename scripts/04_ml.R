@@ -33,8 +33,8 @@ source("R/utils.R")
 
 
 # Define input/output directories ----------------------------------------------
-in_dir <- "results/04_pre_ml"
-out_dir <- "results/05_ml"
+in_dir <- "results/03_pre_ml"
+out_dir <- "results/04_ml"
 
 
 # Define helper functions ------------------------------------------------------
@@ -64,7 +64,7 @@ get_configuration <- function() {
 }
 
 # Split cohort object for training and internal validation, extract class
-# balance and class counts and check for sufficient sample size (>=20)
+# balance and class counts and check for sufficient sample size (>=30)
 partition_training <- function(
     train_obj,
     partition_ratio = 0.7,
