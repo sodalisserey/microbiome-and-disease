@@ -353,7 +353,7 @@ plot_matrix <- function(
                  aes(Prediction, Reference, fill = Proportion)) +
     geom_tile() +
     geom_text(aes(label = sprintf("%.1f%%\n(n = %d)", Proportion * 100, count)),
-              size = 5) +
+              size = 4) +
     facet_wrap(~ model) +
     labs(title = comparison_key) +
     coord_equal() +
@@ -364,7 +364,7 @@ plot_matrix <- function(
       legend.position = "bottom",
       panel.grid = element_blank(),
       panel.background = element_blank(),
-      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      plot.title = element_text(size = 14),
       axis.text = element_text(size = 14),
       axis.title = element_text(size = 14),
       axis.title.x = element_text(margin = margin(t = 15)),
@@ -489,7 +489,7 @@ extract_training <- function(mod, train_res_dir, plot) {
     mat_rf = mat_rf,
     mat_xgb = mat_xgb,
     out_dir = mat_dir,
-    plot = plot)
+    plot = TRUE)
     
   # Return training results
   return(list( 
@@ -501,7 +501,7 @@ extract_training <- function(mod, train_res_dir, plot) {
       val_name = meta$comparison,
       val_cohort = meta$cohort,
       val_disease = meta$disease,
-      comparison_type = "same_cohort_same",
+      comparison_type = "same_cohort_same_disease",
       relationship = "internal",
       n_case = n_case,
       n_control = n_control,
@@ -764,9 +764,8 @@ analyse_training <- function(train_res, train_res_dir) {
   
   analysed_df <- do.call(rbind, lapply(train_analysis, as.data.frame))
   
-  # TODO make all these changes to validation too
-  # Pass this to stat_res somehow to be plotted in rf/xgb plot
-  
+  # TODO simplify
+
   # Calculate delta quartiles
   roc_quartiles <- quantile(
     analysed_df$delta_roc_auc, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
@@ -872,6 +871,15 @@ analyse_training <- function(train_res, train_res_dir) {
     pr_padj = p_adj$pr_auc,
     brier_pval = p_values$brier,
     brier_padj = p_adj$brier,
+    balanced_accuracy_pval = p_values$balanced_accuracy,
+    balanced_accuracy_padj = p_adj$balanced_accuracy,
+    sensitivity_pval = p_values$sensitivity,
+    sensitivity_padj = p_adj$sensitivity,
+    precision_pval = p_values$precision,
+    precision_padj = p_adj$precision,
+    f1_pval = p_values$f1,
+    f1_padj = p_adj$f1,
+    
     pct_xgb_roc_win = pct_xgb_roc_win,
     pct_xgb_pr_win = pct_xgb_pr_win,
     pct_xgb_brier_win = pct_xgb_brier_win
@@ -939,7 +947,11 @@ analyse_validation <- function(val_res, val_res_dir) {
       roc_ci_upper = as.numeric(delong_res$conf.int[2]),
       roc_pval = as.numeric(delong_res$p.value),
       delta_pr_auc = results$rf$pr_auc  - results$xgb$pr_auc,
-      delta_brier = results$rf$brier  - results$xgb$brier)
+      delta_brier = results$rf$brier  - results$xgb$brier,
+      delta_balanced_accuracy = results$rf$balanced_accuracy  - results$xgb$balanced_accuracy,
+      delta_sensitivity = results$rf$sensitivity  - results$xgb$sensitivity,
+      delta_precision = results$rf$precision  - results$xgb$precision,
+      delta_f1 = results$rf$f1  - results$xgb$f1)
     
     val_analysis[[comparison_key]] <- c(meta, analysis_res)
   }
@@ -956,30 +968,62 @@ analyse_validation <- function(val_res, val_res_dir) {
   brier_quartiles <- quantile(
     analysed_df$delta_brier, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
   
-  # Test whether median delta AUCs are significant overall
+  balanced_accuracy_quartiles <- quantile(
+    analysed_df$delta_balanced_accuracy, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  
+  sensitivity_quartiles <- quantile(
+    analysed_df$delta_sensitivity, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  
+  precision_quartiles <- quantile(
+    analysed_df$delta_precision, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  
+  f1_quartiles <- quantile(
+    analysed_df$delta_f1, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  
+  # Test whether median metrics are different from zero
   wilcox_roc <- wilcox.test(
-    analysed_df$delta_roc_auc,
-    mu = 0,
-    alternative = "two.sided",
-    exact = FALSE)
+    analysed_df$delta_roc_auc, mu = 0, alternative = "two.sided", exact = FALSE)
   
   wilcox_pr <- wilcox.test(
-    analysed_df$delta_pr_auc,
-    mu = 0,
-    alternative = "two.sided",
-    exact = FALSE)
+    analysed_df$delta_pr_auc, mu = 0, alternative = "two.sided", exact = FALSE)
   
   wilcox_brier <- wilcox.test(
-    analysed_df$delta_brier,
-    mu = 0,
-    alternative = "two.sided",
-    exact = FALSE)
+    analysed_df$delta_brier, mu = 0, alternative = "two.sided", exact = FALSE)
+  
+  wilcox_balanced_accuracy <- wilcox.test(
+    analysed_df$delta_balanced_accuracy, mu = 0, alternative = "two.sided", exact = FALSE)
+  
+  wilcox_sensitivity <- wilcox.test(
+    analysed_df$delta_sensitivity, mu = 0, alternative = "two.sided", exact = FALSE)
+  
+  wilcox_precision <- wilcox.test(
+    analysed_df$delta_precision, mu = 0, alternative = "two.sided", exact = FALSE)
+  
+  wilcox_f1 <- wilcox.test(
+    analysed_df$delta_f1, mu = 0, alternative = "two.sided", exact = FALSE)
   
   # FDR correction 
   p_values <- list(
     roc_auc = wilcox_roc$p.value,
     pr_auc = wilcox_pr$p.value,
-    brier = wilcox_brier$p.value)
+    brier = wilcox_brier$p.value,
+    balanced_accuracy = wilcox_balanced_accuracy$p.value,
+    sensitivity = wilcox_sensitivity$p.value,
+    precision = wilcox_precision$p.value,
+    f1 = wilcox_f1$p.value)
+  
+  p_adj <- p.adjust(p_values, method = "fdr")
+  p_adj <- as.list(p_adj)
+  
+  # FDR correction 
+  p_values <- list(
+    roc_auc = wilcox_roc$p.value,
+    pr_auc = wilcox_pr$p.value,
+    brier = wilcox_brier$p.value,
+    balanced_accuracy = wilcox_balanced_accuracy$p.value,
+    sensitivity = wilcox_sensitivity$p.value,
+    precision = wilcox_precision$p.value,
+    f1 = wilcox_f1$p.value)
   
   p_adj <- p.adjust(p_values, method = "fdr")
   p_adj <- as.list(p_adj)
@@ -1013,22 +1057,39 @@ analyse_validation <- function(val_res, val_res_dir) {
     iqr1_delta_brier = brier_quartiles["25%"], 
     median_delta_brier = brier_quartiles["50%"], 
     iqr3_delta_brier = brier_quartiles["75%"], 
+    iqr1_delta_balanced_accuracy = balanced_accuracy_quartiles["25%"], 
+    median_delta_balanced_accuracy = balanced_accuracy_quartiles["50%"], 
+    iqr3_delta_balanced_accuracy = balanced_accuracy_quartiles["75%"], 
+    iqr1_delta_sensitivity = sensitivity_quartiles["25%"], 
+    median_delta_sensitivity = sensitivity_quartiles["50%"], 
+    iqr3_delta_sensitivity = sensitivity_quartiles["75%"], 
+    iqr1_delta_precision = precision_quartiles["25%"], 
+    median_delta_precision = precision_quartiles["50%"], 
+    iqr3_delta_precision = precision_quartiles["75%"], 
+    iqr1_delta_f1 = f1_quartiles["25%"], 
+    median_delta_f1 = f1_quartiles["50%"], 
+    iqr3_delta_f1 = f1_quartiles["75%"], 
+    
     roc_pval = p_values$roc_auc,
     roc_padj = p_adj$roc_auc,
     pr_pval = p_values$pr_auc,
     pr_padj = p_adj$pr_auc,
     brier_pval = p_values$brier,
     brier_padj = p_adj$brier,
+    balanced_accuracy_pval = p_values$balanced_accuracy,
+    balanced_accuracy_padj = p_adj$balanced_accuracy,
+    sensitivity_pval = p_values$sensitivity,
+    sensitivity_padj = p_adj$sensitivity,
+    precision_pval = p_values$precision,
+    precision_padj = p_adj$precision,
+    f1_pval = p_values$f1,
+    f1_padj = p_adj$f1,
+    
     pct_xgb_roc_win = pct_xgb_roc_win,
     pct_xgb_pr_win = pct_xgb_pr_win,
     pct_xgb_brier_win = pct_xgb_brier_win
-    # roc_ttest_lower = roc_ttest[1],
-    # roc_ttest_higher = roc_ttest[2],
-    # pr_ttest_lower = pr_ttest[1],
-    # pr_ttest_higher = pr_ttest[2],
-    # brier_ttest_lower = brier_ttest[1],
-    # brier_ttest_higher = brier_ttest[2])
   )
+  
   
   # Save analysis data frame as csv
   write.csv(
@@ -1078,6 +1139,9 @@ analyse_by_categories <- function(
   
   train_analysed <- train_analysis$analysed
   val_analysed <- val_analysis$analysed
+  
+  train_analysed_summary <- train_analysis$analysed_summary
+  val_analysed_summary <- val_analysis$analysed_summary
   
   # Combine train results and analysis with validation results and analysis
   combo_results <- c(train_res, val_res)
@@ -1725,7 +1789,9 @@ analyse_by_categories <- function(
       rel_dunn = rel_dunn_df,
       cor_rel_vs_delta = cor_rel_vs_delta_df,
       effect_summary = effect_summary,
-      variance = variance)))
+      variance = variance,
+      train_summary = train_analysed_summary,
+      val_summary = val_analysed_summary)))
 }
 
 
