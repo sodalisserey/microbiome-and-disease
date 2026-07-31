@@ -218,6 +218,9 @@ calculate_beta_diversity <- function(
     scale_colour_manual(values = my_colours) +
     scale_fill_manual(values = my_colours)+
     
+    scale_x_continuous(breaks = scales::breaks_width(0.5)) +
+    scale_y_continuous(breaks = scales::breaks_width(0.5)) +
+    
     # samples
     geom_point(size = 1.5) +
     
@@ -234,8 +237,8 @@ calculate_beta_diversity <- function(
       aspect.ratio = 1,
       legend.position = "bottom",
       legend.direction = "horizontal",
-      axis.text = element_text(size = 16),
-      axis.title = element_text(size = 16),
+      axis.text = element_text(size = 15),
+      axis.title = element_text(size = 15),
       legend.text = element_text(size = 8),
       legend.title = element_text(size = 8)
     )

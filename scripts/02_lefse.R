@@ -51,7 +51,7 @@ qc_cohort <- function(
     class_imbalance_high = 5,
     class_imbalance_severe = 10,
     age_imbalance_thresh = 0.25,
-    n_status_thresh = 5) {
+    n_status_thresh = 10) {
   
   meta <- as.data.frame(colData(cohort))
   
@@ -428,6 +428,22 @@ analysis_pipeline <- function(
     qc = qc,
     analysis_res = analysis_res)
   
+  # Skip LEfSe if either group has too few samples
+  if (!is.na(qc$n_status)) {
+    
+    analysis_res <- log_analysis(
+      comparison_name = comparison_name,
+      cohort_name = cohort_name,
+      disease = disease,
+      status = "SKIPPED",
+      reason = qc$n_status,
+      result = NULL,
+      analysis_res = analysis_res)
+    
+    message("Skipping: sample size < 10")
+    
+    return(analysis_res)}
+  
   # Run and log LEfSe
   result <- lefse_analyse(
     cohort,
@@ -629,29 +645,29 @@ create_plot <- function(
       values = c(
         setNames("#c5cb93ff", control_label),
         setNames("#dfa57eff", disease_label)),
-      labels = c(
-        setNames("control", control_label),
-        setNames("case", disease_label)),
+      labels = c("Control", "Case"),
       name = "Enriched in") +
     
     scale_x_continuous(
       expand = expansion(mult = c(0.05, 0.05))) +
     
-    theme_minimal(base_size = 14) +
+    theme_minimal(base_size = 20) +
     theme(
       plot.title = element_text(
         face = "bold",
-        size = 14,
-        hjust = 0.5),
+        size = 20,
+        hjust = 0),
       
       axis.text.y = element_text(
-        size = 14,
+        size = 20,
         face = "italic"),
       
-      # TODO legend text size increase
+      axis.title = element_text(size = 20),
+      axis.text.x = element_text(size = 20),
+      
       legend.position = "bottom",
-      legend.title = element_text(size = 14),
-      legend.text = element_text(size = 14),
+      legend.title = element_text(size = 20),
+      legend.text = element_text(size = 20),
       panel.grid.major.y = element_blank(),
       panel.grid.minor = element_blank()) +
     
@@ -681,7 +697,7 @@ save_plot <- function(
     out_dir,
     paste0(safe_comp, ".pdf"))
   
-  plot_height <- max(2.5, n_features * 0.25 + 1.5)
+  plot_height <- max(4, n_features * 0.45 + 1.5)
   
   ggsave(
     filename = out_path,
@@ -765,6 +781,8 @@ run_analysis <- function(primary_cohorts, out_dir) {
   })
   lapply(analysis_res$contingency_tables, dim)
   
+  return(analysis_res)
+  
   # Export results
   dir.create("results", recursive = TRUE, showWarnings = FALSE)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
@@ -786,8 +804,6 @@ run_analysis <- function(primary_cohorts, out_dir) {
       qc_summary = analysis_res$qc_summary,
       analysis_log = analysis_res$analysis_log),
     out_dir = out_dir)
-  
-  return(analysis_res)
 }
 
 run_plotting <- function(
@@ -800,7 +816,9 @@ run_plotting <- function(
   dir.create(file.path(plot_dir), recursive = TRUE,
              showWarnings = FALSE)
   
-  lefse_res <- analysis_res$lefse_df
+  # Convert list of comparisons into dataframe
+  lefse_res <- dplyr::bind_rows(
+    analysis_res$lefse_results)
   
   lefse_res <- extract_taxon(lefse_res, rank = "genus")
   
@@ -861,6 +879,5 @@ primary_cohorts <- readRDS("data/primary.rds")
 
 
 # Execute ----------------------------------------------------------------------
-analysis_res <- run_analysis(primary_cohorts, out_dir)
+# analysis_res <- run_analysis(primary_cohorts, out_dir)
 run_plotting(analysis_res, out_dir)
-

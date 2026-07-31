@@ -1,13 +1,11 @@
 # Utility functions for reading, writing and processing curatedMetagenomicData cohorts
 
-# # Load packages and dependencies -----------------------------------------------
-# library(curatedMetagenomicData)
-# library(SummarizedExperiment)
-# library(dplyr)
+# To update devel version
+# remotes::install_github("omicsForestry/CrcBiomeScreen",ref = "devel", force = TRUE)
 
 
 # Reading and writing ----------------------------------------------------------
-#' Read cohort list from txt file 
+# Read cohort list from txt file 
 read_cohort_list <- function(path) { 
   
   lines <- readLines(path, warn = FALSE)
@@ -20,7 +18,7 @@ read_cohort_list <- function(path) {
   unique(lines)
 }
 
-#' Load cohorts from list and generate list of cohort objects
+# Load cohorts from list and generate list of cohort objects
 load_cohorts <- function(cohorts) {
 
   out <- lapply(cohorts, function(study) {
@@ -31,7 +29,7 @@ load_cohorts <- function(cohorts) {
       obj <- curatedMetagenomicData(
         paste0(study, ".relative_abundance"),
         dryrun = FALSE,
-        rownames = "short")[[1]]
+        rownames = "long")[[1]]
 
       meta <- SummarizedExperiment::colData(obj)
       
@@ -54,14 +52,13 @@ load_cohorts <- function(cohorts) {
   out
 }
 
-#' Write multiple data frames to csv files
-write_csvs <- function(out_dir, data_list) {
+# Write multiple data frames to csv files
+write_csvs <- function(data_list, out_dir) {
   for (nm in names(data_list)) {
     write.csv(
       data_list[[nm]],
       file.path(out_dir, paste0(nm, ".csv")),
-      row.names = FALSE
-    )
+      row.names = FALSE)
   }
   message("\nDone. CSVs written to: ", file.path(out_dir))
 }
