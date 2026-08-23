@@ -1,4 +1,5 @@
-# Conduct LEfSe analysis using lefser package
+# Identify differential taxa using `lefser` package
+
 # 1. Define output directory and functions
 # 2. Load data using utils.R
 # 3. Execute main functions:
@@ -18,11 +19,6 @@
 #       as out_dir/[log].csv
 #     * Save bulk lefse_result object as out_dir/lefse_results.rds
 
-# TODO collapse branches via comparisons
-# TODO filter by sample size before analysis
-# TODO compile contingency table and QC into one output
-# TODO update documentation after combining with lefse_plot.R
-# TODO conduct at genus level instead of species
 
 # Load packages and dependencies -----------------------------------------------
 library(curatedMetagenomicData)
@@ -35,30 +31,18 @@ source("R/utils.R")
 
 
 # Define output directory ------------------------------------------------------
-out_dir <- "results/02_lefse"
+out_dir <- "results/02_taxa"
 
 
-# Define analysis functions ----------------------------------------------------
-# Run QC on a cohort and return a contingency table, class imbalance and 
-# age imbalance ratios and counts
+# Define helper functions ------------------------------------------------------
+# Run QC on a single cohort
 qc_cohort <- function(
     cohort,
-    cohort_name,
-    disease,
-    age_col = "age_category",
-    condition_col = "study_condition",
-    class_imbalance_mid = 2,
-    class_imbalance_high = 5,
-    class_imbalance_severe = 10,
-    age_imbalance_thresh = 0.25,
-    n_status_thresh = 10) {
+    status = "SUCCESS",
+    reason = NA_character_) {
   
   meta <- as.data.frame(colData(cohort))
   
-  # Ensure metadata exist
-  if (!all(c(age_col, condition_col) %in% colnames(meta))) {
-    stop("Required metadata columns not found")
-  }
   
   # Create contingency table data frame
   contingency_df <- as.data.frame(as.table(
@@ -122,7 +106,7 @@ qc_cohort <- function(
   counts <- as.list(table(meta[[condition_col]]))
   
   n_controls <- counts[["control"]] %||% 0
-  n_conditions <- counts[[disease]] %||% 0
+  n_conditions <- counts[[condition]] %||% 0
   
   n_status <- character()
   
@@ -131,7 +115,7 @@ qc_cohort <- function(
   }
   
   if (n_conditions < 5) {
-    n_status <- c(n_status, paste0("n ", disease, " < ", n_status_thresh))
+    n_status <- c(n_status, paste0("n ", condition, " < ", n_status_thresh))
   }
   
   n_status <- if (length(n_status) == 0) {
@@ -187,7 +171,7 @@ lefse_analyse <- function(
     
     ## there is more than one age group
     if (nrow(age_tab) < 2) {
-      message("Subclass disabled: only one age group")
+      message("  - subclass disabled: only one age group")
       
     } else {
       
@@ -196,15 +180,15 @@ lefse_analyse <- function(
       
       if (all(valid_strata)) {
         subclass <- "age_category"
-        message("Subclass enabled: age stratification valid")
+        message("  - subclass enabled: age stratification valid")
       } else {
-        message("Subclass disabled: some age groups lack class balance")
+        message("  - subclass disabled: some age groups lack class balance")
       }
     }
   }
   
   message(
-    "Running LEfSe",
+    "  - running LEfSe",
     " | samples = ", ncol(cohort),
     " | features = ", nrow(cohort)
   )
@@ -225,7 +209,7 @@ lefse_analyse <- function(
   genus <- genus[keep]
   
   if (nrow(abund) == 0) {
-    message("ERROR: no genus-level features found")
+    message("  - ERROR: no genus-level features found")
     return(NULL)
   }
   
@@ -239,7 +223,7 @@ lefse_analyse <- function(
     colData = meta)
   
   message(
-    "After genus aggregation: features = ",
+    "  - features after genus aggregation = ",
     nrow(cohort))
   
   # Transform relative abundance
@@ -266,7 +250,7 @@ lefse_analyse <- function(
 #' ratio, class imbalance, age ratio, age imbalance and condition counts, append
 #' analysis_res$qc_summary and return analysis_res
 log_qc <- function(
-    comparison_name, 
+    combination, 
     cohort_name, 
     disease, 
     qc, 
@@ -282,7 +266,7 @@ log_qc <- function(
   }
 
   row <- data.frame(
-    comparison = comparison_name,
+    comparison = combination,
     cohort = cohort_name,
     disease = disease,
     
@@ -298,9 +282,9 @@ log_qc <- function(
     
     stringsAsFactors = FALSE)
   
-  analysis_res$qc_summary[[comparison_name]] <- row
+  analysis_res$qc_summary[[combination]] <- row
   
-  analysis_res$contingency_tables[[comparison_name]] <- 
+  analysis_res$contingency_tables[[combination]] <- 
     qc$contingency_table
   
   return(analysis_res)
@@ -309,7 +293,7 @@ log_qc <- function(
 #' Log LEfSe analysis status for a single comparison, append 
 #' analysis_res$analysis_log and return analysis_res
 log_analysis <- function(
-    comparison_name, 
+    combination, 
     cohort_name, 
     disease, 
     status = NULL,
@@ -324,7 +308,7 @@ log_analysis <- function(
   
   create_log <- function(status, reason) {
     data.frame(
-      comparison = comparison_name,
+      comparison = combination,
       cohort = cohort_name,
       disease = disease,
       status = status,
@@ -334,14 +318,14 @@ log_analysis <- function(
   
   # Case 1: explicit SKIPPED when condition_invalid == TRUE
   if (!is.null(status) && status == "SKIPPED") {
-    analysis_res$analysis_log[[comparison_name]] <-
+    analysis_res$analysis_log[[combination]] <-
       create_log("SKIPPED", reason)
     return(analysis_res)
   }
   
   # Case 2: null result
   if (is.null(result)) {
-    analysis_res$analysis_log[[comparison_name]] <-
+    analysis_res$analysis_log[[combination]] <-
       create_log("FAILED", "LEfSe returned NULL")
     return(analysis_res)
   }
@@ -352,13 +336,13 @@ log_analysis <- function(
     error = function(e) NULL)
   
   if (is.null(result_df)) {
-    analysis_res$analysis_log[[comparison_name]] <-
+    analysis_res$analysis_log[[combination]] <-
       create_log("FAILED", "Could not coerce LEfSe output to data frame")
     return(analysis_res)
   }
   
   # Case 4: success
-  analysis_res$analysis_log[[comparison_name]] <-
+  analysis_res$analysis_log[[combination]] <-
     create_log("SUCCESS", paste("n_features =", nrow(result_df)))
   
   return(analysis_res)
@@ -367,7 +351,7 @@ log_analysis <- function(
 #' Log LEfSe result from a single analysis, append analysis_res$lefse_results
 #' and return analysis_res
 log_result <- function(
-    comparison_name, 
+    combination, 
     cohort_name, 
     disease, 
     result, 
@@ -380,7 +364,7 @@ log_result <- function(
   
   # Store metadata
   row <- data.frame(
-    comparison = comparison_name,
+    comparison = combination,
     cohort = cohort_name,
     disease = disease,
     stringsAsFactors = FALSE)
@@ -402,66 +386,59 @@ log_result <- function(
   
   # Combine and store data frames
   combined <- cbind(row[rep(1, nrow(result_df)), , drop = FALSE], result_df)
-  analysis_res$lefse_results[[comparison_name]] <- combined
+  analysis_res$lefse_results[[combination]] <- combined
   
   return(analysis_res)
 }
 
-#' Run analysis pipeline which includes QC checks, LEfSe analysis and logging
+# Run analysis pipeline on a single combination
 analysis_pipeline <- function(
     cohort,
     cohort_name,
-    comparison_name,
-    disease,
+    combination,
+    condition,
     analysis_res) {
   
-  # Run and log QC
+  # Run QC
   qc <- qc_cohort(
     cohort,
     cohort_name = cohort_name, 
-    disease = disease)
-  
-  analysis_res <- log_qc(
-    comparison_name = comparison_name,
-    cohort_name = cohort_name,
-    disease = disease,
-    qc = qc,
-    analysis_res = analysis_res)
+    condition = condition)
   
   # Skip LEfSe if either group has too few samples
   if (!is.na(qc$n_status)) {
     
     analysis_res <- log_analysis(
-      comparison_name = comparison_name,
+      combination = combination,
       cohort_name = cohort_name,
-      disease = disease,
+      condition = condition,
       status = "SKIPPED",
       reason = qc$n_status,
       result = NULL,
       analysis_res = analysis_res)
     
-    message("Skipping: sample size < 10")
+    message("  - skipping: sample size < 10")
     
     return(analysis_res)}
   
-  # Run and log LEfSe
+  # Run LEfSe
   result <- lefse_analyse(
     cohort,
-    comparison = paste("control vs", disease),
-    disease_label = disease)
+    comparison = paste("control vs", condition),
+    disease_label = condition)
   
   analysis_res <- log_analysis(
-    comparison_name = comparison_name,
+    combination = combination,
     cohort_name = cohort_name,
-    disease = disease,
+    condition = condition,
     result = result,
     analysis_res = analysis_res)
   
   # Store results in analysis
   analysis_res <- log_result(
-    comparison_name = comparison_name,
+    combination = combination,
     cohort_name = cohort_name,
-    disease = disease,
+    condition = condition,
     result = result,
     analysis_res = analysis_res)
   
@@ -469,7 +446,6 @@ analysis_pipeline <- function(
 }
 
 
-# Define plotting functions ----------------------------------------------------
 # Extract species label from full clade string
 extract_taxon <- function(df, rank = c("genus", "species", "family")) {
   
@@ -650,20 +626,14 @@ create_plot <- function(
     
     scale_x_continuous(
       expand = expansion(mult = c(0.05, 0.05))) +
+    scale_y_discrete(labels = function(x) gsub("unclassified", "*", x)) +
     
     theme_minimal(base_size = 20) +
     theme(
-      plot.title = element_text(
-        face = "bold",
-        size = 20,
-        hjust = 0),
-      
-      axis.text.y = element_text(
-        size = 20,
-        face = "italic"),
-      
-      axis.title = element_text(size = 20),
-      axis.text.x = element_text(size = 20),
+      plot.title = element_blank(),
+      axis.text.y = element_text(size = 22, face = "italic"),
+      axis.title.x = element_text(size = 22),
+      axis.text.x = element_text(size = 20, margin = margin (t = 5)),
       
       legend.position = "bottom",
       legend.title = element_text(size = 20),
@@ -710,103 +680,78 @@ save_plot <- function(
 }
 
 # Define main functions --------------------------------------------------------
-#' Run main LEfSe loop for two analysis branches
-run_analysis <- function(primary_cohorts, out_dir) {
+run_analysis <- function(cohorts, out_dir) {
   
-  # Initialise storage object
-  analysis_res <- list()
-  
-  for (cohort_name in names(primary_cohorts)) {  
-    
-    # Process and extract study_conditions from cohort
-    cohort <- primary_cohorts[[cohort_name]]
-    info <- process_conditions(cohort)
-    
-    # Check cohort contains both control and disease samples
-    condition_invalid <- validate_conditions(info, cohort_name)
-    
-    if (!is.null(condition_invalid)) {
-      analysis_res <- log_analysis(
-        comparison_name,
-        cohort_name,
-        disease,
-        status = "SKIPPED",
-        reason = condition_invalid,
-        analysis_res = analysis_res)
-      next
-      
-    # ANALYSIS BRANCH 1: control x 1 disease
-    } else if (info$n_diseases == 1) {
-      
-      disease = info$diseases
-      
-      comparison_name <- paste(cohort_name, disease, sep = "_")
-      message("\n", cohort_name, ": control vs ", info$diseases)
-      
-      analysis_res <- analysis_pipeline(
-        cohort = cohort,
-        cohort_name = cohort_name,
-        disease = disease,
-        comparison_name = comparison_name,
-        analysis_res = analysis_res)
-      
-    # ANALYSIS BRANCH 2: control x >1 disease
-    } else {
-      
-      message("\n", cohort_name, ": control vs ", info$n_diseases, " diseases")
-      
-      for (disease in info$diseases) {
-        
-        message("\n", cohort_name, " subset: control vs ", disease)
-        
-        # Subset cohort for control x 1 disease
-        meta <- as.data.frame(colData(cohort))
-        keep <- meta$study_condition %in% c("control", disease)
-        cohort_subset <- cohort[, keep]
-
-        comparison_name <- paste(cohort_name, disease, sep = "_")
-        
-        analysis_res <- analysis_pipeline(cohort = cohort_subset,
-                                 cohort_name = cohort_name,
-                                 disease = disease,
-                                 comparison_name = comparison_name,
-                                 analysis_res = analysis_res)
-        }
-      }
-  }
-  sapply(analysis_res$contingency_tables, function(x) {
-    if (is.null(x)) return("NULL")
-    if (length(x) == 0) return("EMPTY")
-    class(x)
-  })
-  lapply(analysis_res$contingency_tables, dim)
-  
-  return(analysis_res)
-  
-  # Export results
   dir.create("results", recursive = TRUE, showWarnings = FALSE)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  result <- list()
   
-  # Save full object
-  saveRDS(analysis_res, file.path(out_dir, "lefse_results.rds"))
+  for (cohort_name in names(cohorts)) {  
+    
+    # Process and extract study_conditions from cohort
+    cohort <- cohorts[[cohort_name]]
+    info <- process_conditions(cohort)
+    
+    message("\n", cohort_name, ": control vs ", info$n_conditions, " condition/s")
+    
+    # Check cohort contains both case and control samples
+    condition_invalid <- validate_conditions(info, cohort_name)
+    
+    for (condition in info$conditions) {
+      
+      message(" > Condition: ", condition)
+      
+      combination <- paste(cohort_name, condition, sep = "_")
+      meta <- as.data.frame(colData(cohort))
+      keep <- meta$study_condition %in% c("control", condition)
+      cohort_subset <- cohort[, keep]
+      
+      result <- analysis_pipeline(
+        cohort = cohort_subset,
+        cohort_name = cohort_name,
+        condition = condition,
+        combination = combination)
+      
+      return(result)
+    }
+  }
   
-  # Bind data frames
-  analysis_res$analysis_log <- dplyr::bind_rows(analysis_res$analysis_log)
-  analysis_res$qc_summary <- dplyr::bind_rows(analysis_res$qc_summary)
-  analysis_res$contingency_df <- dplyr::bind_rows(analysis_res$contingency_tables)
-  analysis_res$lefse_df <- dplyr::bind_rows(analysis_res$lefse_results)
+  # Export
+  saveRDS(
+    analysis_res,
+    file.path(out_dir, "lefse_results.rds")
+  )
   
-  # Write CSVs
+  analysis_res$analysis_log <- dplyr::bind_rows(
+    analysis_res$analysis_log
+  )
+  
+  analysis_res$qc_summary <- dplyr::bind_rows(
+    analysis_res$qc_summary
+  )
+  
+  analysis_res$contingency_df <- dplyr::bind_rows(
+    analysis_res$contingency_tables
+  )
+  
+  analysis_res$lefse_df <- dplyr::bind_rows(
+    analysis_res$lefse_results
+  )
+  
   write_csvs(
     data_list = list(
       lefse_results = analysis_res$lefse_df,
       contingency_tables = analysis_res$contingency_df,
       qc_summary = analysis_res$qc_summary,
-      analysis_log = analysis_res$analysis_log),
-    out_dir = out_dir)
+      analysis_log = analysis_res$analysis_log
+    ),
+    out_dir = out_dir
+  )
+  
+  return(analysis_res)
 }
 
-run_plotting <- function(
+create_plots <- function(
     analysis_res,
     out_dir,
     min_features = 2,
@@ -876,8 +821,8 @@ run_plotting <- function(
 
 # Load data --------------------------------------------------------------------
 primary_cohorts <- readRDS("data/primary.rds")
+primary_cohorts <- primary_cohorts[c("GuptaA_2019", "KieserS_2018", "IjazUZ_2017", "IaniroG_2022")]
 
 
 # Execute ----------------------------------------------------------------------
-# analysis_res <- run_analysis(primary_cohorts, out_dir)
-run_plotting(analysis_res, out_dir)
+analysis_res <- run_analysis(primary_cohorts, out_dir)

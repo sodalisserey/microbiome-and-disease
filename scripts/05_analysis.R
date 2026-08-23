@@ -125,12 +125,8 @@ calculate_auc <- function(
         Model = "XGB"))
     
     roc_labels <- paste0(
-        "RF ROC-AUC = ", sprintf("%.3f", roc_auc_rf),
-        "\n(95% CI: ", sprintf("%.3f", ci_rf[1]),
-        "-", sprintf("%.3f", ci_rf[3]), ")",
-        "\nXGB ROC-AUC = ", sprintf("%.3f", roc_auc_xgb),
-        "\n(95% CI: ", sprintf("%.3f", ci_xgb[1]),
-        "-", sprintf("%.3f", ci_xgb[3]), ")")
+        "RF = ", sprintf("%.2f", roc_auc_rf),
+        "\nXGB = ", sprintf("%.2f", roc_auc_xgb))
     
     roc_plot <- ggplot(roc_df, aes(FPR, TPR, colour = Model)) +
       geom_line(linewidth = 1.2) +
@@ -147,22 +143,25 @@ calculate_auc <- function(
       theme_classic() +
       theme(
         panel.grid = element_blank(),
-        axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 14, margin = margin(t = 15)),
-        axis.title.y = element_text(size = 14, margin = margin(r = 15)),
-        plot.title = element_text(size = 14, hjust = 0.5),
+        axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.x = element_text(size = 18, margin = margin(r = 40, t = 5)),
+        axis.title.y = element_text(size = 18, margin = margin(r = 5)),
+        plot.title = element_blank(),
         legend.position = "bottom",
         legend.direction = "horizontal",
-        legend.text = element_text(size = 14)) +
+        legend.text = element_text(size = 14),
+        plot.margin = margin(
+          r = 10,
+          l = 10)) +
       annotate(
         "text",
         x = Inf,
         y = -Inf,
         label = roc_labels,
         hjust = 1,
-        vjust = -0.1,
-        size = 3.7)
+        vjust = -0.3,
+        size = 5.5)
     
     # For PR curve
     pr_df <- rbind(
@@ -177,9 +176,9 @@ calculate_auc <- function(
     
     pr_labels <- c(
       RF = paste0(
-        "RF (AUC = ", sprintf("%.3f", pr_auc_rf), ")"),
+        "RF (AUC = ", sprintf("%.2f", pr_auc_rf), ")"),
       XGB = paste0(
-        "XGB (AUC = ", sprintf("%.3f", pr_auc_xgb), ")"))
+        "XGB (AUC = ", sprintf("%.2f", pr_auc_xgb), ")"))
     
     pr_plot <- ggplot(pr_df, aes(Recall, Precision, colour = Model)) +
       geom_line(linewidth = 1.2) +
@@ -195,11 +194,11 @@ calculate_auc <- function(
       theme_classic() +
       theme(
         panel.grid = element_blank(),
-        axis.text.x = element_text(size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title.x = element_text(size = 14, margin = margin(t = 15)),
-        axis.title.y = element_text(size = 14, margin = margin(r = 15)),
-        plot.title = element_text(size = 14, hjust = 0.5),
+        axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.x = element_text(size = 18, margin = margin(r = 30)),
+        axis.title.y = element_text(size = 18),
+        plot.title = element_blank(),
         legend.position = "top", 
         legend.justification = c(0, 1),
         legend.direction = "vertical",
@@ -361,14 +360,14 @@ plot_matrix <- function(
                         guide = guide_colourbar(direction = "horizontal")) +
     theme_minimal() +
     theme(
-      legend.position = "bottom",
+      legend.position = "none",
       panel.grid = element_blank(),
       panel.background = element_blank(),
-      plot.title = element_text(size = 14),
+      plot.title = element_blank(),
       axis.text = element_text(size = 14),
       axis.title = element_text(size = 14),
-      axis.title.x = element_text(margin = margin(t = 15)),
-      axis.title.y = element_text(margin = margin(r = 15)),
+      axis.title.x = element_text(margin = margin(t = 5)),
+      axis.title.y = element_text(margin = margin(r = 5)),
       axis.text.y = element_text(angle = 90, hjust = 0.5),
       strip.text = element_text(size = 14))
   
@@ -376,7 +375,7 @@ plot_matrix <- function(
     ggsave(file.path(out_dir, paste0(comparison_key, ".pdf")), 
            plot,
            width = 4,
-           height = 4))
+           height = 2.5))
 }
 
 get_relationship <- function(train_disease, val_disease) {
@@ -465,7 +464,7 @@ extract_training <- function(mod, train_res_dir, plot) {
     y_prob_rf = y_prob_rf,
     y_prob_xgb = y_prob_xgb,
     out_dir = auc_dir,
-    plot = plot)
+    plot = TRUE)
   
   # Calculate Brier score
   brier_rf <- calculate_brier(y_true, y_prob_rf)
@@ -489,7 +488,7 @@ extract_training <- function(mod, train_res_dir, plot) {
     mat_rf = mat_rf,
     mat_xgb = mat_xgb,
     out_dir = mat_dir,
-    plot = TRUE)
+    plot = plot)
     
   # Return training results
   return(list( 
