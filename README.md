@@ -32,7 +32,7 @@ Normalises, harmonises and QCs datasets to prepare for training.
 #### `scripts/04_ml.R`
 Trains and externally validates a single processed model.
 
-This script is executed by a Slurm wrapper found at `slurm/ml_array`.
+This script is executed by a Slurm wrapper found at `ml_array.sh`.
 
 #### `scripts/05_analysis.R`
 Analyses training and validation results from machine learning.
