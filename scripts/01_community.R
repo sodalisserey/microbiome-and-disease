@@ -3,14 +3,13 @@
 # 1. Define output directory and functions
 # 2. Load data using utils.R
 # 3. Execute main function run_analysis() which:
-#   * Cleans, extracts disease and validates conditions
 #   * Runs calculate_dissimilarity(), which:
 #         - quantifies Bray-Curtis dissimilarity
 #         - runs PERMANOVA and PERMDISP 
 #         - logs results
 #   * Runs plot_pcoa()
 #   * Exports summary statistics as out_dir/results.csv
-#   * Exports plots as out_dir/plots[cohort_name]_pcoa.pdf
+#   * Exports plots as out_dir/plots[cohort_name].pdf
 
 
 # Load packages and dependencies -----------------------------------------------
@@ -33,11 +32,10 @@ calculate_dissimilarity <- function(
     condition_col = "study_condition",
     permutations = 9999,
     dispersion_permutations = 999,
-    n_status_thresh = 5,
-    out_dir) {
+    n_status_thresh = 5) {
   
   # Initialise
-  warnings_list <- NA
+  warnings_list <- character()
   error_msg <- NA
   
   # Analysis
@@ -94,8 +92,8 @@ calculate_dissimilarity <- function(
       adonis = ad,
       betadisper = bd,
       dispersion_test = bd_test,
-      meta = meta)
-    
+      metadata = meta)
+
   }, warning = function(w) {
     warnings_list <<- c(warnings_list, w$message)
     invokeRestart("muffleWarning")
@@ -105,40 +103,34 @@ calculate_dissimilarity <- function(
     return(NULL)
   })
   
-  # Build summary
+  # If no results
   if (is.null(result)) {
     
-    summary <- data.frame(
+    qc <- data.frame(
       cohort_name = cohort_name,
       study_conditions = NA_character_,
       n_conditions = NA_integer_,
-      status = "FAILED",
       r2 = NA_real_,
       p_value = NA_real_,
       dispersion_p = NA_real_,
       n = NA_integer_,
       n_status = NA_character_,
       warnings = if (length(warnings_list) > 0) {
-        paste(warnings_list, collapse = " | ")
-      } else {
-        NA_character_
-      },
+        paste(warnings_list, collapse = " | ") } else {NA_character_},
       error = error_msg,
-      stringsAsFactors = FALSE
-    )
+      status = "no results",
+      stringsAsFactors = FALSE)
     
     return(list(
-      result = NULL,
-      summary = summary,
-      warnings = warnings_list,
-      error = error_msg
-    ))
+      dissimilarity = NULL,
+      metadata = NULL,
+      qc = qc))
   }
 
   # Extract summary statistics
   ad <- result$adonis
   bd_test <- result$dispersion_test
-  meta <- result$meta
+  meta <- result$metadata
   
   study_conditions <- paste(
     unique(meta[[condition_col]]),
@@ -183,11 +175,7 @@ calculate_dissimilarity <- function(
       if (counts[[condition]] < n_status_thresh) {
         n_status <- c(
           n_status,
-          paste0(
-            "n ",
-            condition,
-            " < ",
-            n_status_thresh))
+          paste0("n ", condition, " < ", n_status_thresh))
       }
     }
   }
@@ -200,39 +188,37 @@ calculate_dissimilarity <- function(
       collapse = " | ")
   }
   
-  # Summary row
-  summary <- data.frame(
+  # Log successful results
+  qc <- data.frame(
     cohort_name = cohort_name,
     study_conditions = study_conditions,
     n_conditions = n_conditions,
-    status = "SUCCESS",
     r2 = r2,
     p_value = p_value,
     dispersion_p = dispersion_p,
     n = n_samples,
     n_status = n_status,
     warnings = if (length(warnings_list) > 0) {
-      paste(warnings_list, collapse = " | ")
-    } else {
-      NA_character_
-    },
+      paste(warnings_list, collapse = " | ")} else {NA_character_},
     error = NA_character_,
-    stringsAsFactors = FALSE
-  )
+    status = "SUCCESS",
+    stringsAsFactors = FALSE)
   
-  list(
-    result = result,
-    summary = summary,
-    warnings = warnings_list,
-    error = error_msg
-  )
+  return(list(
+    dissimilarity = list(
+      bray = result$bray,
+      adonis = result$adonis,
+      betadisper = result$betadisper,
+      dispersion_test = result$dispersion_test),
+    metadata = result$metadata,
+    qc = qc))
 }
 
 
 # Plot PCoA figures for each cohort
 plot_pcoa <- function(
     cohort_name,
-    dissimilarity_res,
+    processed,
     condition_col = "study_condition",
     out_dir){
   
@@ -240,8 +226,8 @@ plot_pcoa <- function(
   plot_dir <- file.path(out_dir, "plots")
   dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
   
-  bd <- dissimilarity_res$result$betadisper
-  meta <- dissimilarity_res$result$meta
+  bd <- processed$dissimilarity$betadisper
+  meta <- processed$metadata
   
   message(" > Plotting PCoA figure")
   
@@ -312,21 +298,29 @@ plot_pcoa <- function(
     coord_fixed(ratio = 1) +
     theme_classic(base_size = 16) +
     theme(
+      plot.title = element_blank(),
       aspect.ratio = 1,
       legend.position = "bottom",
-      legend.direction = "horizontal",
+      legend.justification = "left",
+      legend.direction = "vertical",
       axis.text = element_text(size = 15),
       axis.title = element_text(size = 15),
-      legend.text = element_text(size = 8),
-      legend.title = element_text(size = 8))
+      legend.text = element_text(size = 15),
+      legend.title = element_text(size = 15)) +
+    guides(
+      colour = guide_legend(ncol = 1))
+  
+  n_conditions <- length(condition_levels)
+  
+  plot_height <- max(4, 2.5 + n_conditions * 0.2)
   
   ggsave(
     file.path(
       plot_dir,
-      paste0(cohort_name, "_pcoa.pdf")),
+      paste0(cohort_name, ".pdf")),
     plot = p,
     width = 3,
-    height = 4,
+    height = plot_height,
     units = "in")
   
   invisible(p)
@@ -338,66 +332,44 @@ run_analysis <- function(cohorts, out_dir) {
   
   dir.create("results", recursive = TRUE, showWarnings = FALSE)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  analysis_res <- list()
+  results <- list()
   
   for (cohort_name in names(cohorts)) {
     
     cohort <- cohorts[[cohort_name]]
     info <- process_conditions(cohort)
     
-    # Check conditions
-    condition_invalid <- validate_conditions(info, cohort_name)
-    
-    if (!is.null(condition_invalid)) {
-      
-      analysis_res[[cohort_name]] <- data.frame(
-        cohort_name = cohort_name,
-        study_conditions = NA_character_,
-        n_conditions = NA_integer_,
-        status = "FAILED",
-        r2 = NA_real_,
-        p_value = NA_real_,
-        dispersion_p = NA_real_,
-        n = NA_integer_,
-        n_status = NA_character_,
-        warnings = NA_character_,
-        error = condition_invalid,
-        stringsAsFactors = FALSE)
-      
-      next
-    }
+    # Check cohort contains both case and control samples
+    validation <- validate_conditions(info, cohort_name)
+    if (!is.null(validation)) {next}
     
     message("\nCalculating beta-diversity for cohort: ", cohort_name)
     
     # Calculate dissimilarity
-    dissimilarity_res <- calculate_dissimilarity(
+    processed <- calculate_dissimilarity(
       cohort = info$cohort, 
-      cohort_name = cohort_name,
-      out_dir = out_dir)
+      cohort_name = cohort_name)
     
-    # Save summary
-    analysis_res[[cohort_name]] <- dissimilarity_res$summary
+    results[[cohort_name]] <- processed
     
     # Plot figures
-    if (!is.null(dissimilarity_res$result)) {
+    if (!is.null(processed$dissimilarity)) {
       
       plot_pcoa(
         cohort_name = cohort_name,
-        dissimilarity_res = dissimilarity_res,
+        processed = processed,
         out_dir = out_dir)
     }
   }
-    
-  message("\nExporting analysis results")
-  permanova_df <- dplyr::bind_rows(analysis_res)
   
-  write_csv(permanova_df, file.path(out_dir, "results.csv"))
+  qc <- dplyr::bind_rows(lapply(results, `[[`, "qc"))
+  
+  write_csv(qc, file.path(out_dir, "results.csv"))
   
   message(
-    "Done. Results written to: ",
-    out_dir)
+    "\nResults written to: ", out_dir)
   
-  return(analysis_res)
+  return(qc)
 }
   
     

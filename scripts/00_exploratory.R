@@ -1,3 +1,13 @@
+# Generate exploratory figures to show sample distribution and composition
+
+# 1. Define output directory and functions
+# 2. Load data using utils.R
+# 3. Execute main function run_exploratory() which:
+#   * Runs plot_distribution
+#   * Runs plot_composition
+#   * Exports plots as out_dir/[plot_name].pdf
+
+
 # Load packages and dependencies -----------------------------------------------
 library(SummarizedExperiment)
 library(countrycode)
@@ -13,9 +23,9 @@ out_dir <- "results/00_exploratory"
 
 
 # Define helper functions ------------------------------------------------------
-plot_cohort_on_map <- function(cohorts, out_dir) {
+plot_distribution <- function(cohorts, out_dir) {
   
-  message("Plotting cohorts on world map")
+  message("Plotting sample distribution")
   
   # Download country polygons
   world <- gisco_get_countries(
@@ -76,14 +86,17 @@ plot_cohort_on_map <- function(cohorts, out_dir) {
       colour = "#6EC4C0") +
     theme_minimal() +
     labs(size = "Samples") +
+    scale_size_continuous(
+      breaks = c(500, 1000, 1500, 2000)) +
     theme(
-      legend.position = "right",
       legend.text = element_text(size = 16),
-      legend.title = element_text(size = 16),
+      legend.title = element_blank(),
       axis.text = element_text(size = 16),
       axis.title = element_text(size = 16),
       legend.key.height = unit(1.2, "cm"),
-      legend.key.width = unit(1.2, "cm"))
+      legend.key.width = unit(1.2, "cm"),
+      legend.position = "bottom",
+      legend.direction = "horizontal")
   
   ggsave(
     filename = file.path(out_dir, "cohort_world_map.pdf"),
@@ -97,9 +110,9 @@ plot_cohort_on_map <- function(cohorts, out_dir) {
 }
 
 
-plot_cohort_samples <- function(cohorts, out_dir) {
+plot_composition <- function(cohorts, out_dir) {
   
-  message("Plotting sample sizes")
+  message("Plotting sample size composiion")
   
   case_control <- lapply(names(cohorts), function(x){
     meta <- as.data.frame(colData(cohorts[[x]]))
@@ -152,6 +165,7 @@ plot_cohort_samples <- function(cohorts, out_dir) {
     scale_fill_manual(
       values = c("control" = "#c5cb93ff", "case" = "#DFA57E"),
       labels = c(control = "Control", case = "Case")) +
+    scale_x_discrete(labels = function(x) gsub("_", " ", x)) +
     geom_text(
       data = star_df,
       aes(
@@ -168,13 +182,15 @@ plot_cohort_samples <- function(cohorts, out_dir) {
       axis.text.y = element_text(size = 18),
       axis.title = element_text(size = 20),
       legend.text = element_text(size = 16),
-      legend.title = element_text(size = 18))
+      legend.title = element_blank(),
+      legend.position = "bottom",
+      legend.direction = "horizontal")
   
   ggsave(
     filename = file.path(out_dir, "cohort_sample_size.pdf"),
     plot = p,
     width = 12,
-    height = 4)
+    height = 4.5)
   
   return(cohort_summary)
 }
@@ -183,8 +199,8 @@ plot_cohort_samples <- function(cohorts, out_dir) {
 # Define main function ---------------------------------------------------------
 run_exploratory <- function(cohorts, out_dir) {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  geoplot <- plot_cohort_on_map(cohorts, out_dir)
-  barplot <- plot_cohort_samples(cohorts, out_dir)
+  geoplot <- plot_distribution(cohorts, out_dir)
+  barplot <- plot_composition(cohorts, out_dir)
   
   message("\nPlots saved to: ", out_dir)
   
