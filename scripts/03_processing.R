@@ -1,26 +1,26 @@
-# Prepare raw cohorts for ML training using CrcBiomeScreen package
+# Prepare cohorts for ML training using `CrcBiomeScreen` package
+
 # 1. Define output directory and functions
 # 2. Load primary.RDS 
-# 3. Execute main function run_processing() which runs:
-#     a. normalise_cohorts()
-#         * normalises list of raw cohorts
-#         * saves as out_dir/raw_normalised/[cohort]_raw_normalised.rds
-#     b. harmonise_cohorts()
-#         * combines intersecting features of all normalised cohorts
-#         * sets empty features to 0
-#     c. qc_cohorts()
-#         * runs QC on normalised and harmonised cohorts
-#         * saves as out_dir/norm_processed/[cohort]_norm_processed.rds
-#     d. get_comparisons()
-#         * loops through cohorts for unique healthy x disease combinations
-#         * subsets QC processed cohorts by disease
-#         * checks for sufficient sample size (>= 30) and add binary labels
-#         * saves as out_dir/final/[comparison]_final.rds
-#         * lists file paths of _final.rds objects as out_dir/comparisons.txt
-#     e. create_comparison_table()
-#         * creates evaluation matrix of unique comparisons
-#         * extracts train/val metadata and create comparison_type tags
-#         * saves as out_dir/comparison_table.csv
+# 3. Execute main function run_processing() which:
+#   a. runs normalise_cohorts()
+#     * normalises list of raw cohorts
+#     * saves as out_dir/raw_normalised/[cohort]_raw_normalised.rds
+#   b. runs harmonise_cohorts()
+#     * performs zero-imputation to represent all global features
+#   c. runs qc_cohorts()
+#     * runs QC on normalised and harmonised cohorts
+#     * saves as out_dir/norm_processed/[cohort]_norm_processed.rds
+#   d. runs get_combinations()
+#     * loops through cohorts for unique cohort-condition combinations
+#     * subsets QC processed cohorts by condition
+#     * checks for sufficient sample size (>= 30) and add binary labels
+#     * saves as out_dir/final/[combination]_final.rds
+#     * lists file paths of _final.rds objects as out_dir/combinations.txt
+#   e. runs create_comparison_table()
+#     * creates evaluation matrix of unique combinations
+#     * extracts train/val metadata and create matched_scenario tags
+#     * saves as out_dir/combination_table.csv
 
 
 # Load packages and dependencies -----------------------------------------------
@@ -30,11 +30,11 @@ source("R/utils.R")
 
 
 # Define output directory ------------------------------------------------------
-out_dir <- "results/04_pre_ml"
+out_dir <- "results/03_processing"
 
 
 # Define helper functions ------------------------------------------------------
-# Normalise list of raw cohorts, save as RDS and return objects
+# Normalise list of raw cohorts
 normalise_cohorts <- function(
     cohort_list,
     out_dir,
@@ -42,7 +42,6 @@ normalise_cohorts <- function(
   
   message("Normalising raw cohorts:")
   
-  # Initialise
   norm_dir <- file.path(out_dir, "raw_normalised")
   dir.create(norm_dir, recursive = TRUE, showWarnings = FALSE)
   norm_list <- list()
@@ -80,7 +79,7 @@ normalise_cohorts <- function(
       
       # Standardise labels
       obj@SampleData$study_condition <-
-        clean_condition(obj@SampleData$study_condition)
+        clean_case(obj@SampleData$study_condition)
       
       obj
       
@@ -96,21 +95,18 @@ normalise_cohorts <- function(
 
     # Store in memory
     norm_list[[cohort_name]] <- obj
-    
-    # TODO Log warnings/errors and norm_method
-    
   }
   message(length(norm_list), " cohorts saved to: ", norm_dir)
   
   return(norm_list)
 }
 
+
 # Harmonise features of normalised cohorts and return objects
 harmonise_cohorts <- function(
     norm_list,
     global_features) {
   
-  # Initialise
   harmonised_list <- list()
   
   for (cohort_name in names(norm_list)) {
@@ -150,7 +146,7 @@ harmonise_cohorts <- function(
   return(harmonised_list)
 }
 
-# QC list of normalised and harmonised cohorts, save as RDS and return objects
+# QC list of normalised and harmonised cohorts
 qc_cohorts <- function(
     harmonised_list,
     out_dir,
@@ -230,136 +226,134 @@ qc_cohorts <- function(
   return(qc_list)
 }
 
-# Loop through QC-processed cohorts,  generate unique healthy x disease
-# combinations, check for sufficient sample size (>=30), add binary validation 
-# labels, save as RDS and return objects
-get_comparisons <- function(
+# Generate unique cohort-condition combinations
+get_combinations <- function(
     qc_list,
     condition_col = "study_condition",
-    healthy_label = "control",
+    control_label = "control",
     min_n = 30) {
   
-  message("\nRetrieving comparisons:")
+  message("\nRetrieving combinations:")
   
   # Initialise
-  comp_dir <- file.path(out_dir, "final")
-  dir.create(comp_dir, recursive = TRUE, showWarnings = FALSE) 
-  comparison_list <- list()
+  comb_dir <- file.path(out_dir, "final")
+  dir.create(comb_dir, recursive = TRUE, showWarnings = FALSE) 
+  combination_list <- list()
   
   for (cohort_name in names(qc_list)) {
   
     cohort_obj <- qc_list[[cohort_name]]$obj
     
-    # Extract conditions and get unique diseases
+    # Get unique conditions
     meta <- cohort_obj@SampleData
     conditions <- unique(meta[[condition_col]])
-    diseases <- setdiff(conditions, healthy_label)
+    conditions <- setdiff(conditions, control_label)
     
-    for (disease in diseases) {
+    for (condition in conditions) {
       
-      comparison <- paste0(cohort_name, "_", disease)
+      combination <- paste0(cohort_name, "_", condition)
       
       # Filter sample size
-      sub_meta <- meta[meta[[condition_col]] %in% c(healthy_label, disease), ]
+      sub_meta <- meta[meta[[condition_col]] %in% c(control_label, condition), ]
       vals <- sub_meta[[condition_col]]
       
-      n_control <- sum(vals == healthy_label, na.rm = TRUE)
-      n_disease <- sum(vals == disease, na.rm = TRUE)
+      n_control <- sum(vals == control_label, na.rm = TRUE)
+      n_case <- sum(vals == condition, na.rm = TRUE)
       
-      if (n_control < min_n || n_disease < min_n) {
-        message("   Skipping: ", comparison, " (n_control=", n_control,
-                ", n_disease=", n_disease, ")")
+      if (n_control < min_n || n_case < min_n) {
+        message("   Skipping: ", combination, " (n_control = ", n_control,
+                ", n_case = ", n_case, ")")
         next
       }
       
-      message("   Filtering: ", comparison)
+      message("   Filtering: ", combination)
       
       obj <- cohort_obj
       
       filtered_obj <- FilterDataSet(
         obj,
-        label = c(healthy_label, disease),
+        label = c(control_label, condition),
         condition_col = condition_col)
       
       # Add binary validation label
-      filtered_obj@SampleData$validation_condition <-
+      filtered_obj@SampleData$validation_case <-
         ifelse(
-          filtered_obj@SampleData[[condition_col]] == disease,
-          "disease",
+          filtered_obj@SampleData[[condition_col]] == condition,
+          "case",
           "control")
       
       # Store result
-      comparison_list[[comparison]] <- list(
+      combination_list[[combination]] <- list(
         obj = filtered_obj,
         metadata = list(
-          comparison = comparison,
+          combination = combination,
           cohort = cohort_name,
-          disease = disease,
+          condition = condition,
           n_control = n_control,
-          n_disease = n_disease))
+          n_case = n_case))
       
       saveRDS(
-        comparison_list[[comparison]],
+        combination_list[[combination]],
         file.path(
-          comp_dir,
-          paste0(comparison, "_final.rds")))
+          comb_dir,
+          paste0(combination, "_final.rds")))
     }
   }
-  message(length(comparison_list), " comparisons saved to: ", comp_dir)
+  message(length(combination_list), " combinations saved to: ", comb_dir)
   
   # Index file paths as TXT
   files <- list.files(
-    path = comp_dir,
+    path = comb_dir,
     pattern = "_final\\.rds$",
     full.names = TRUE)
 
   writeLines(
-    files, file.path(out_dir,"comparisons.txt"))
+    files, file.path(out_dir,"combinations.txt"))
 
-  return(comparison_list)
+  return(combination_list)
 }
 
-# Create evaluation matrix using unique comparisons, extract train/val cohort 
-# metadata, add comparison_type tags and save as CSV
+# Create evaluation matrix using unique combinations, extract train/val cohort 
+# metadata, add matched_scenario tags and save as CSV
 create_comparison_table <- function(
-    comparison_list,
+    processing_res,
     out_dir) {
   
-  # Build one row per comparison
-  comparisons <- do.call(
+  # Build one row per combination
+  combinations <- do.call(
     rbind,
-    lapply(names(comparison_list), function(name) {
+    lapply(names(processing_res), function(name) {
       
-      obj <- comparison_list[[name]]$obj
+      obj <- processing_res[[name]]$obj
       meta <- obj@SampleData
       
-      disease <- unique(
-        meta$study_condition[meta$validation_condition == "disease"])
+      condition <- unique(
+        meta$study_condition[meta$validation_case == "case"])
       
-      cohort <- sub(paste0("_", disease, "$"), "", name)
+      cohort <- sub(paste0("_", condition, "$"), "", name)
       
       data.frame(
-        comparison = name,
+        combination = name,
         cohort = cohort,
-        disease = disease,
+        condition = condition,
         stringsAsFactors = FALSE)
     }))
   
   # Training cohort
-  train_cohorts <- comparisons %>%
-    mutate(train_name = paste0(cohort, "_", disease)) %>%
+  train_cohorts <- combinations %>%
+    mutate(train_name = paste0(cohort, "_", condition)) %>%
     transmute(
       train_name,
       train_cohort = cohort,
-      train_disease = disease)
+      train_case = condition)
   
   # Validation datasets
-  val_cohorts <- comparisons %>%
-    mutate(val_name = paste0(cohort, "_", disease)) %>%
+  val_cohorts <- combinations %>%
+    mutate(val_name = paste0(cohort, "_", condition)) %>%
     transmute(
       val_name,
       val_cohort = cohort,
-      val_disease = disease)
+      val_condition = condition)
   
   # Cartesian product
   comparison_table <- merge(train_cohorts, val_cohorts, by = NULL)
@@ -370,17 +364,17 @@ create_comparison_table <- function(
   # Label comparison type
   comparison_table <- comparison_table |>
     mutate(
-      comparison_type = case_when(
+      matched_scenario = case_when(
         train_cohort == val_cohort &
-          train_disease != val_disease ~ "same_cohort_diff_disease",
+          train_case != val_condition ~ "cohort",
         
         train_cohort != val_cohort &
-          train_disease == val_disease ~ "cross_cohort_same_disease",
+          train_case == val_condition ~ "condition",
         
         train_cohort != val_cohort &
-          train_disease != val_disease ~ "cross_cohort_diff_disease",
+          train_case != val_condition ~ "neither",
         
-        TRUE ~ "internal"))
+        TRUE ~ "both"))
   
   write.csv(
     comparison_table,
@@ -394,7 +388,7 @@ create_comparison_table <- function(
 
 
 # Define main functions --------------------------------------------------------
-#' Run main ML normalisedaration for cohorts
+# Run main ML normalisedaration for cohorts
 run_processing <- function(cohort_list, out_dir) {
 
   # Normalise cohort_list
@@ -420,11 +414,11 @@ run_processing <- function(cohort_list, out_dir) {
     out_dir = out_dir, 
     plot = TRUE)
   
-  # Create unique healthy x disease comparisons
-  processing_res <- get_comparisons(qc_list)
+  # Create unique cohort-condition combinations
+  processing_res <- get_combinations(qc_list)
   
-  # Generate comparison table
-  comparison_table <- create_comparison_table(processing_res, out_dir)
+  # Generate combination table
+  create_comparison_table(processing_res, out_dir)
   
   return(processing_res)
 }

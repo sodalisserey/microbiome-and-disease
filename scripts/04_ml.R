@@ -1,29 +1,29 @@
-# Train ML models from prepped comparisons using CrcBiomeScreen package
+# Train ML models from prepped combinations using CrcBiomeScreen package
 # 1. Define output directory and functions
 # 2. Load comparison_table.csv and define command line args
 # 3. Execute main function run_modelling() which runs:
-#     a. get_configuration()
-#         * returns num_cores and n_cv according to computing configuration
-#     b. partition_training()
-#         * splits cohort object for training and internal validation
-#         * checks for sufficient training sample size (>= 20) and class balance
-#         * returns partitioned training object
-#     c. train_model() 
-#         * enables/disables class weights
-#         * models partitioned training object using RF and XGBoost
-#         * runs extract_auc() and prints values
-#         * saves as out_dir/models/[comparison]_model.rds
-#     d. validate_model() 
-#         * filters for current validation rows from comparison_table
-#         * for each row, load validation objects from in_dir/final
-#         * externally validates trained objects using RF and XGBoost
-#         * runs extract_auc() and prints values
-#         * saves as out_dir/final/[comparison]_evaluated.rds
-#     e. export_logs()
-#         * combines results from partition_training() and train_model() and save
-#           as out_dir/training_log/[comparison].csv
-#         * combines results from validate_model() and save as out_dir/validation_
-#           log/[comparison].csv
+#   a. get_configuration()
+#     * returns num_cores and n_cv according to computing configuration
+#   b. partition_training()
+#     * splits cohort object for training and internal validation
+#     * checks for sufficient training sample size (>= 20) and class balance
+#     * returns partitioned training object
+#   c. train_model() 
+#     * enables/disables class weights
+#     * models partitioned training object using RF and XGBoost
+#     * runs extract_auc() and prints values
+#     * saves as out_dir/models/[combination]_model.rds
+#   d. validate_model() 
+#     * filters for current validation rows from comparison_table
+#     * for each row, load validation objects from in_dir/final
+#     * externally validates trained objects using RF and XGBoost
+#     * runs extract_auc() and prints values
+#     * saves as out_dir/final/[combination]_evaluated.rds
+#   e. export_logs()
+#     * combines results from partition_training() and train_model() and save
+#           as out_dir/training_log/[combination].csv
+#     * combines results from validate_model() and save as out_dir/validation_
+#           log/[combination].csv
 
 
 # Load packages and dependencies -----------------------------------------------
@@ -33,8 +33,8 @@ source("R/utils.R")
 
 
 # Define input/output directories ----------------------------------------------
-in_dir <- "results/03_pre_ml"
-out_dir <- "results/04_ml"
+in_dir <- "results/03_processing"
+out_dir <- "results/04_ml_test"
 
 
 # Define helper functions ------------------------------------------------------
@@ -79,7 +79,7 @@ partition_training <- function(
   suppressWarnings(  
     obj <- SplitDataSet(
       obj,
-      label = c("control", "disease"),
+      label = c("control", "case"),
       partition = partition_ratio,
       condition_col = "validation_condition"))
   
@@ -91,15 +91,15 @@ partition_training <- function(
   
   class_weights <- balance$is_imbalanced
   
-  message("   > class imbalance = ", class_weights)
+  message(" > class imbalance = ", class_weights)
   
   # Extract counts and check sample size
   class_counts <- table(balance$class_counts)
   
   part_n_control <- if (
     !is.null(balance$class_counts[["control"]])) balance$class_counts[["control"]] else 0
-  part_n_disease  <- if (
-    !is.null(balance$class_counts[["disease"]])) balance$class_counts[["disease"]] else 0
+  part_n_case  <- if (
+    !is.null(balance$class_counts[["case"]])) balance$class_counts[["case"]] else 0
   
   n_status <- character()
   
@@ -107,8 +107,8 @@ partition_training <- function(
     n_status <- c(n_status, paste0("controls < ", partition_threshold))
   }
   
-  if (part_n_disease < partition_threshold) {
-    n_status <- c(n_status, paste0(train_disease, " < ", partition_threshold))
+  if (part_n_case < partition_threshold) {
+    n_status <- c(n_status, paste0(train_condition, " < ", partition_threshold))
   }
   
   n_status <- if (length(n_status) == 0) {
@@ -117,8 +117,8 @@ partition_training <- function(
     paste(n_status, collapse = " | ")
   }     
   
-  message("   > sample size = ", n_status, 
-          " (controls = ", part_n_control, " | disease = ", part_n_disease, ")")
+  message(" > sample size = ", n_status, 
+          " (control = ", part_n_control, " | case = ", part_n_case, ")")
   
   # Compile results
   partition <- list(
@@ -126,7 +126,7 @@ partition_training <- function(
     partition_threshold = partition_threshold,
     n_status = n_status,
     part_n_control = part_n_control,
-    part_n_disease = part_n_disease,
+    part_n_case = part_n_case,
     class_weights = class_weights)
   
   return(list(
@@ -158,18 +158,18 @@ train_model <- function(
   obj <- train_obj$obj
   meta <- train_obj$metadata
   part <- train_obj$partition
-  comparison <- meta$comparison
-  disease <- meta$disease
+  combination <- meta$combination
+  condition <- meta$condition
   
   # Confirm if model already exists
   mod_file <- file.path(
     mod_dir,
-    paste0(comparison, "_model.rds"))
+    paste0(combination, "_model.rds"))
   
   # Skip if model already exists
   if (file.exists(mod_file)) {
     message("\nSkipping model training")
-    message("   > already exists at: ", mod_file)
+    message(" > already exists at: ", mod_file)
     
     train_obj <- readRDS(mod_file)
 
@@ -184,34 +184,34 @@ train_model <- function(
   
   # Class weights enabled/disabled
   class_weights <- if (part$class_weights == FALSE) {
-    message("   > class weights disabled")
+    message(" > class weights disabled")
     FALSE
   } else {
-    message("   > class weights enabled")
+    message(" > class weights enabled")
     TRUE
   }
   
   warnings <- character()
   error_msg <- character()
   
-  message ("   > RF model training")
+  message (" > RF model training")
   mod <- suppressMessages(
     withCallingHandlers(
       tryCatch({
         mod <- TrainModels(
           obj,
           model_type = "RF",
-          TaskName = paste0(comparison, "_RF"),
+          TaskName = paste0(combination, "_RF"),
           ClassWeights = class_weights,
-          TrueLabel = "disease",
+          TrueLabel = "case",
           num_cores = num_cores,
           n_cv = n_cv)
         
         mod <- EvaluateModel(
           mod,
           model_type = "RF",
-          TaskName = paste0(comparison, "_RF_test"),
-          TrueLabel = "disease",
+          TaskName = paste0(combination, "_RF_test"),
+          TrueLabel = "case",
           PlotAUC = FALSE)
         
         mod
@@ -231,24 +231,24 @@ train_model <- function(
     extract_auc(mod@EvaluateResult$RF$AUC)
   }
   
-  message ("   > XGBoost model training")
+  message (" > XGBoost model training")
   mod <- suppressMessages(
     withCallingHandlers(
       tryCatch({
         mod <- TrainModels(
           mod,
           model_type = "XGBoost",
-          TaskName = paste0(comparison, "_XGB"),
+          TaskName = paste0(combination, "_XGB"),
           ClassWeights = class_weights,
-          TrueLabel = "disease",
+          TrueLabel = "case",
           num_cores = num_cores,
           n_cv = n_cv)
         
         mod <- EvaluateModel(
           mod,
           model_type = "XGBoost",
-          TaskName = paste0(comparison, "_XGB_test"),
-          TrueLabel = "disease",
+          TaskName = paste0(combination, "_XGB_test"),
+          TrueLabel = "case",
           PlotAUC = FALSE)
         
         mod
@@ -286,9 +286,9 @@ train_model <- function(
   if (train_obj$training$status == "SUCCESS") {
     saveRDS(
       train_obj,
-      file.path(mod_dir, paste0(comparison, "_model.rds")))
+      file.path(mod_dir, paste0(combination, "_model.rds")))
     
-    message("   > model saved to: ", mod_dir)
+    message(" > model saved to: ", mod_dir)
   }
   
   return(train_obj)
@@ -320,9 +320,9 @@ validate_model <- function(
     
     row <- comparisons[i, ]
     val_name <- row$val_name
-    comparison_type <- row$comparison_type
+    matched_scenario <- row$matched_scenario
     
-    if (comparison_type == "internal") {
+    if (matched_scenario == "both") {
       message(" [", i, "] ", val_name, " (internal)\n")
       next
     }
@@ -339,7 +339,7 @@ validate_model <- function(
     warnings <- character()
     error_msg <- character()
     
-    message ("   > RF model validation")
+    message (" > RF model validation")
     tmp <- suppressMessages(
       withCallingHandlers(
         tryCatch({
@@ -348,7 +348,7 @@ validate_model <- function(
             ValidationData = val_obj,
             model_type = "RF",
             TaskName = paste0(val_name),
-            TrueLabel = "disease",
+            TrueLabel = "case",
             condition_col = "validation_condition",
             PlotAUC = FALSE)
           
@@ -372,7 +372,7 @@ validate_model <- function(
       extract_auc(rf_res$AUC)
     }
 
-    message ("   > XGBoost model validation")
+    message (" > XGBoost model validation")
     tmp <- suppressMessages(
       withCallingHandlers(
         tryCatch({
@@ -381,7 +381,7 @@ validate_model <- function(
             ValidationData = val_obj,
             model_type = "XGBoost",
             TaskName = paste0(val_name),
-            TrueLabel = "disease",
+            TrueLabel = "case",
             condition_col = "validation_condition",
             PlotAUC = FALSE)
           
@@ -409,13 +409,13 @@ validate_model <- function(
     
     # Extract metrics
     validation[[i]] <- data.frame(
-      train_name = meta$comparison,
+      train_name = meta$combination,
       train_cohort = meta$cohort,
-      train_disease = meta$disease,
+      train_condition = meta$condition,
       val_name = val_name,
       val_cohort = row$val_cohort,
-      val_disease = row$val_disease,
-      comparison_type = row$comparison_type,
+      val_condition = row$val_condition,
+      matched_scenario = row$matched_scenario,
       status = if (length(error_msg) == 0) "SUCCESS" else "FAILED",
       AUC_RF = AUC_RF,
       AUC_XGB = AUC_XGB,
@@ -434,9 +434,9 @@ validate_model <- function(
   
   saveRDS(
       final_obj,
-      file.path(fin_dir, paste0(meta$comparison, "_evaluated.rds")))
+      file.path(fin_dir, paste0(meta$combination, "_evaluated.rds")))
 
-  message("Evaluated model saved as: ", fin_dir, "/", meta$comparison, "_evaluated.rds")
+  message("Evaluated model saved as: ", fin_dir, "/", meta$combination, "_evaluated.rds")
 
   return(final_obj)
 }
@@ -450,7 +450,7 @@ export_logs <- function(final_obj, out_dir) {
   validation_log <- file.path(out_dir, "validation_log")
   dir.create(validation_log, recursive = TRUE, showWarnings = FALSE)
   
-  train_name <- final_obj$metadata$comparison
+  train_name <- final_obj$metadata$combination
   
   summary_df <- c(
     final_obj$metadata,
@@ -485,15 +485,15 @@ run_modelling <- function(
   # Load training object
   message("\nLoading file: ", basename(file))
   train_obj <- readRDS(file)
-  train_name <- train_obj$metadata$comparison
+  train_name <- train_obj$metadata$combination
   
   # Extract comparison rows for current train cohort
   comparisons <- comparison_table[comparison_table$train_name == train_name,]
   
   if (nrow(comparisons) == 0)
-    stop("   > No comparisons found.")
+    stop(" > no comparisons found.")
   
-  message("   > ", nrow(comparisons), " comparisons found")
+  message(" > ", nrow(comparisons), " comparisons found")
   
   # Partition train_obj
   train_obj <- partition_training(train_obj)
@@ -517,27 +517,30 @@ run_modelling <- function(
   return(final_obj)
 }
 
+
 # Load data and define args ----------------------------------------------------
 comparison_table <- read.csv(
   file.path(in_dir, "comparison_table.csv"),
   stringsAsFactors = FALSE)
 
-# For local testing
-# file <- "results/04_pre_ml/final/FengQ_2015_adenoma_final.rds"
-file_list <- readLines("results/04_pre_ml/comparisons.txt")
-
 # For Slurm
-# args <- commandArgs(trailingOnly = TRUE)
-# file <- args[1]
-# 
-# if (length(args) != 1) {
-#   stop("Usage: Rscript 05_ml.R <final.rds>")
-# }
+args <- commandArgs(trailingOnly = TRUE)
+file <- args[1]
+
+if (length(args) != 1) {
+  stop("Usage: Rscript 03_processing.R <final.rds>")
+}
 
 
 # Execute ----------------------------------------------------------------------
-for (file in file_list) {
-  modelling_res <- run_modelling(comparison_table, file, in_dir, out_dir)
-}
+modelling_res <- run_modelling(comparison_table, file, in_dir, out_dir)
 
-test <- readRDS("results/05_ml/final/FengQ_2015_adenoma_evaluated.rds")
+
+# For local testing ------------------------------------------------------------
+# file_list <- readLines(file.path(in_dir, "combinations.txt"))
+
+# for (file in file_list) {
+#   modelling_res <- run_modelling(comparison_table, file, in_dir, out_dir)
+# }
+
+

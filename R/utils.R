@@ -1,10 +1,7 @@
-# Utility functions for reading, writing and processing curatedMetagenomicData cohorts
-
-# To update devel version
-# remotes::install_github("omicsForestry/CrcBiomeScreen",ref = "devel", force = TRUE)
+# Utility functions used for the analysis of `curatedMetagenomicData` cohorts
 
 
-# Reading and writing ----------------------------------------------------------
+# Functions for reading and writing --------------------------------------------
 # Read cohort list from txt file 
 read_cohort_list <- function(path) { 
   
@@ -17,6 +14,7 @@ read_cohort_list <- function(path) {
   
   unique(lines)
 }
+
 
 # Load cohorts from list and generate list of cohort objects
 load_cohorts <- function(cohorts) {
@@ -38,7 +36,7 @@ load_cohorts <- function(cohorts) {
         
         SummarizedExperiment::colData(obj) <- meta
       }
-    
+
       obj
 
     }, error = function(e) {
@@ -52,6 +50,24 @@ load_cohorts <- function(cohorts) {
   out
 }
 
+
+# Read a list of RDS files
+read_rds_files <- function(file_dir) {
+  
+  files <- list.files(
+    path = file.path(file_dir),
+    pattern = "\\.rds$",
+    full.names = TRUE)
+  
+  names(files) <- file_path_sans_ext(basename(files))
+  
+  rds_files <- lapply(files, readRDS)
+  
+  message("\nRDS files read from: ", file_dir)
+  return(rds_files)
+}
+
+
 # Write multiple data frames to csv files
 write_csvs <- function(data_list, out_dir) {
   for (nm in names(data_list)) {
@@ -64,14 +80,14 @@ write_csvs <- function(data_list, out_dir) {
 }
 
 
-# Processing conditions --------------------------------------------------------
-#' Remove / from string to generate clean label
+# Functions for processing -----------------------------------------------------
+# Remove / from string to generate clean label
 clean_condition <- function(x) {
   gsub("[/-]", "", x)
 }
 
-#' Process conditions of a cohort by removing NA or missing values and extracting 
-#' column from metadata
+
+# Process conditions by removing NA/missing values and extracting metadata
 process_conditions <- function(
     cohort,
     condition_col = "study_condition",
@@ -88,59 +104,35 @@ process_conditions <- function(
   
   cohort <- cohort[, keep]
   
-  # Extract conditions after filtering
+  # Extract study conditions after filtering
   meta <- colData(cohort)
   
-  conditions <- unique(meta[[condition_col]])
+  study_conditions <- unique(meta[[condition_col]])
   
-  diseases <- setdiff(conditions, healthy_label)
+  conditions <- setdiff(study_conditions, healthy_label)
   
   list(
     cohort = cohort,
-    healthy_present = healthy_label %in% conditions,
+    case_present = healthy_label %in% study_conditions,
+    study_conditions = study_conditions,
     conditions = conditions,
-    diseases = diseases,
-    n_diseases = length(diseases))
+    n_conditions = length(conditions))
 }
 
 
-#' Check conditions contrast in cohort and print error message if no healthy or
-#' disease samples present 
+# Check for presence of both case and controls
 validate_conditions <- function(info, cohort_name) {
   
-  if (!info$healthy_present || info$n_diseases == 0) {
+  if (!info$case_present || info$n_conditions == 0) {
     
     reason <- dplyr::case_when(
-      !info$healthy_present ~ "No healthy samples",
-      info$n_diseases == 0 ~ "Healthy samples only"
-    )
+      !info$case_present ~ "No cases",
+      info$n_conditions == 0 ~ "Cases only")
     
     message(reason, " in ", cohort_name, ". Skipping.")
-
     return(reason)
   }
   
   return(NULL)
-}
-
-
-
-
-
-
-
-read_rds_files <- function(file_dir) {
-  
-  files <- list.files(
-    path = file.path(file_dir),
-    pattern = "\\.rds$",
-    full.names = TRUE)
-  
-  names(files) <- file_path_sans_ext(basename(files))
-  
-  rds_files <- lapply(files, readRDS)
-  
-  message("\nRDS files read from: ", file_dir)
-  return(rds_files)
 }
 

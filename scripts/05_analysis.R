@@ -1,13 +1,30 @@
 # Check ML results and compile logs using functions from utils.R
 # 1. Define input/output directories and functions
 # 2. Execute main function run_ml_check() which runs:
-#     a. check_results()
-#         * checks for missing results from in_dir/comparisons.txt list
-#     b. compile_logs()
-#         * compiles all individual training logs from out_dir/training_log and   
-#           saves as out_dir/combined_training.csv
-#         * compiles all individual validation logs from out_dir/validation_log  
-#           and saves as out_dir/combined_validation.csv
+#   a. check_results()
+#   b. compile_logs()
+#   c. extract_training() and extract_validation()
+#     * calculates ROC-AUC, PR-AUC and BS
+#     * plots calibration curves and confusion matrices
+#   d. analyse_training() and analyse_validation()
+#     * calculates summary statistics for all metrics
+#     * tests statistical significance of delta metrics
+#   e. analyse_by_categories()
+#     i. Kruskall-Wallis and (Post-Hoc) Dunn's Test
+#        - median metrics across matched scenarios, for each model type
+#     ii. Wilcoxon Signed-Rank 
+#        - median Δmetrics difference from zero, within matched scenarios
+#     iii. Kruskal–Wallis and (Post-Hoc) Pairwise Wilcoxon
+#        - median Δmetrics, across matched scenarios
+#     iv. Spearman's Rank Test
+#        - median metrics, for each model type
+#     v. Spearman's Rank Test
+#        - median metrics, across biological categories
+#     vi. Kruskall-Wallis and (Post-Hoc) Dunn's Test
+#        - median metrics across biological categories, for each model type
+#     vii. Spearman's Rank Test
+#        - median Δmetrics, across biological categories
+
 
 # Load packages and dependencies -----------------------------------------------
 library(CrcBiomeScreen)
@@ -26,16 +43,17 @@ library(ggpubr)
 source("R/utils.R")
 
 # Define input/output directories ----------------------------------------------
-prep_dir <- "results/03_pre_ml"
+prep_dir <- "results/03_processing"
 in_dir <- "results/04_ml"
-out_dir <- "results/05_ml_analysis"
+out_dir <- "results/05_analysis"
 
 
 # Define helper functions ------------------------------------------------------
+# 
 check_results <- function(prep_dir, in_dir) {
   
   expected <- file_path_sans_ext(
-    basename(readLines(file.path(prep_dir, "comparisons.txt"))))
+    basename(readLines(file.path(prep_dir, "combinations.txt"))))
   
   expected <- sub("_final$", "", expected)
   
@@ -44,9 +62,9 @@ check_results <- function(prep_dir, in_dir) {
   missing <- setdiff(expected, completed)
   
   if (length(missing) == 0) {
-    message("All comparisons evaluated successfully")
+    message("All combinations evaluated successfully")
   } else {
-    message(length(missing), " comparison(s) missing:")
+    message(length(missing), " combination(s) missing:")
     message("   ", missing)
     message("")
   }
@@ -72,7 +90,7 @@ compile_logs <- function(log_dir, out_dir, out_file) {
 
 calculate_auc <- function(
     plot = FALSE,
-    comparison_key,
+    combination_key,
     y_true,
     y_prob_rf,
     y_prob_xgb,
@@ -95,10 +113,10 @@ calculate_auc <- function(
     })})
   
   # Calculate PR-AUC
-  scores_pos_rf <- y_prob_rf[y_true == "disease"]
-  scores_neg_rf <- y_prob_rf[y_true != "disease"]
-  scores_pos_xgb <- y_prob_xgb[y_true == "disease"]
-  scores_neg_xgb <- y_prob_xgb[y_true != "disease"]
+  scores_pos_rf <- y_prob_rf[y_true == "case"]
+  scores_neg_rf <- y_prob_rf[y_true != "case"]
+  scores_pos_xgb <- y_prob_xgb[y_true == "case"]
+  scores_neg_xgb <- y_prob_xgb[y_true != "case"]
   
   pr_rf <- pr.curve(scores.class0 = scores_pos_rf, 
                     scores.class1 = scores_neg_rf, curve = TRUE)
@@ -138,7 +156,7 @@ calculate_auc <- function(
       scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.25)) +
       coord_equal() +
       labs(
-        title = paste0(comparison_key, " ROC Curve"),
+        title = paste0(combination_key, " ROC Curve"),
         x = "False Positive Rate", y = "True Positive Rate", colour = NULL) +
       theme_classic() +
       theme(
@@ -189,7 +207,7 @@ calculate_auc <- function(
       scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.25)) +
       coord_equal() +
       labs(
-        title = paste0(comparison_key, " PR Curve"),
+        title = paste0(combination_key, " PR Curve"),
         x = "Recall", y = "Precision", colour = NULL) +
       theme_classic() +
       theme(
@@ -207,14 +225,14 @@ calculate_auc <- function(
     
     # Save plots as pdf
     ggsave(
-      file.path(roc_dir, paste0(comparison_key, ".pdf")),
+      file.path(roc_dir, paste0(combination_key, ".pdf")),
       roc_plot,
       width = 4,
       height = 4.5,
       units = "in")
     
     ggsave(
-      file.path(pr_dir, paste0(comparison_key, ".pdf")),
+      file.path(pr_dir, paste0(combination_key, ".pdf")),
       pr_plot,
       width = 4,
       height = 4.5,
@@ -234,16 +252,16 @@ calculate_auc <- function(
     pr_auc_xgb = pr_auc_xgb))
 }
 
-calculate_brier <- function(y_true, y_prob) {
+calculate_bs <- function(y_true, y_prob) {
   
-  y_binary <- as.numeric(y_true == "disease")
+  y_binary <- as.numeric(y_true == "case")
   
   mean((y_prob - y_binary)^2)
 }
 
 plot_calibration <- function(
     plot = FALSE,
-    comparison_key,
+    combination_key,
     y_true, 
     y_prob_rf,
     y_prob_xgb,
@@ -253,7 +271,7 @@ plot_calibration <- function(
   calib_data <- data.frame(
     obs = factor(
       y_true,
-      levels = c("disease", "control")),
+      levels = c("case"", "control")),
     RF = y_prob_rf,
     XGB = y_prob_xgb)
 
@@ -266,13 +284,13 @@ plot_calibration <- function(
   # Save plot as pdf
   if (plot) {
     
-    pdf(file.path(out_dir, paste0(comparison_key, ".pdf")),
+    pdf(file.path(out_dir, paste0(combination_key, ".pdf")),
         width = 6,
         height = 6)
     
     print(xyplot(
       cal,
-      main = comparison_key,
+      main = combination_key,
       col = c("#A7AF5A", "#896C74"),
       lwd = 2,
       pch = 16,
@@ -322,7 +340,7 @@ plot_calibration <- function(
 
 plot_matrix <- function(
     plot = FALSE,
-    comparison_key,
+    combination_key,
     mat_rf,
     mat_xgb,
     out_dir) {
@@ -354,7 +372,7 @@ plot_matrix <- function(
     geom_text(aes(label = sprintf("%.1f%%\n(n = %d)", Proportion * 100, count)),
               size = 4) +
     facet_wrap(~ model) +
-    labs(title = comparison_key) +
+    labs(title = combination_key) +
     coord_equal() +
     scale_fill_gradient(low = "grey90", high = "#dfa57eff",
                         guide = guide_colourbar(direction = "horizontal")) +
@@ -372,50 +390,50 @@ plot_matrix <- function(
       strip.text = element_text(size = 14))
   
   suppressMessages(
-    ggsave(file.path(out_dir, paste0(comparison_key, ".pdf")), 
+    ggsave(file.path(out_dir, paste0(combination_key, ".pdf")), 
            plot,
            width = 4,
            height = 2.5))
 }
 
-get_relationship <- function(train_disease, val_disease) {
+get_relationship <- function(train_condition, val_condition) {
   
-  # Same disease
-  if (train_disease == val_disease)
-    return("same")
+  # Matched condition
+  if (train_condition == val_condition)
+    return("matched")
   
-  # Precursor / disease continuum
-  continuum <- list(
+  # Precursor / disease spectrum
+  spectrum <- list(
     c("adenoma", "CRC"),
     c("IGT", "T2D"),
     c("prehypertension", "hypertension"),
     c("ACVD", "CAD"))
   
-  for (pair in continuum) {
-    if (all(c(train_disease, val_disease) %in% pair))
-      return("continuum")
+  for (pair in spectrum) {
+    if (all(c(train_condition, val_condition) %in% pair))
+      return("spectrum")
   }
   
-  # Shared biology
-  if (all(c(train_disease, val_disease) %in% 
+  # Related (shared biology/mechanisms)
+  if (all(c(train_condition, val_condition) %in% 
           c("IBD", "CRC")))
-    return("shared")
+    return("related")
   
-  if (all(c(train_disease, val_disease) %in% 
+  if (all(c(train_condition, val_condition) %in% 
           c("T1D", "T2D")))
-    return("shared")
+    return("related")
   
-  if (all(c(train_disease, val_disease) %in% 
+  if (all(c(train_condition, val_condition) %in% 
           c("hypertension", "HF")))
-    return("shared")
+    return("related")
   
-  if (all(c(train_disease, val_disease) %in% 
+  if (all(c(train_condition, val_condition) %in% 
           c("hypertension", "HF", "ACVD", "CAD")))
-    return("shared")
+    return("related")
   
-  if (all(c(train_disease, val_disease) %in% 
+  if (all(c(train_condition, val_condition) %in% 
           c("IGT", "T2D", "ACVD", "CAD")))
-    return("shared")
+    return("related")
 
   return("unrelated")
 }
@@ -426,7 +444,7 @@ extract_training <- function(mod, train_res_dir, plot) {
   
   meta <- mod$metadata
   obj <- mod$obj
-  comparison_key <- meta$comparison
+  combination_key <- meta$combination
   
   # Initialise directories
   plots_dir <- file.path(train_res_dir, "plots")
@@ -448,31 +466,31 @@ extract_training <- function(mod, train_res_dir, plot) {
       class = train_labels,
       n = Freq)
   
-  n_case <- sample_counts$n[sample_counts$class == "disease"]
+  n_case <- sample_counts$n[sample_counts$class == "case"]
   n_control <- sample_counts$n[sample_counts$class == "control"]
   n_outlier <- length(obj@OutlierSamples)
     
   # Extract predictions data
   y_true = obj@ModelData$TestLabel
-  y_prob_rf = obj@EvaluateResult$RF$predictions[, "disease"]
+  y_prob_rf = obj@EvaluateResult$RF$predictions[, "case"]
   y_prob_xgb = obj@EvaluateResult$XGBoost$predictions
   
   # Plot ROC-AUC and PR-AUC
   auc <- calculate_auc(
-    comparison_key = comparison_key,
+    combination_key = combination_key,
     y_true = y_true,
     y_prob_rf = y_prob_rf,
     y_prob_xgb = y_prob_xgb,
     out_dir = auc_dir,
-    plot = TRUE)
+    plot = plot)
   
-  # Calculate Brier score
-  brier_rf <- calculate_brier(y_true, y_prob_rf)
-  brier_xgb <- calculate_brier(y_true, y_prob_xgb)
+  # Calculate BS
+  bs_rf <- calculate_bs(y_true, y_prob_rf)
+  bs_xgb <- calculate_bs(y_true, y_prob_xgb)
   
   # Plot calibration curve
   cal <- plot_calibration(
-    comparison_key = comparison_key, 
+    combination_key = combination_key, 
     y_true = y_true, 
     y_prob_rf = y_prob_rf, 
     y_prob_xgb = y_prob_xgb, 
@@ -484,7 +502,7 @@ extract_training <- function(mod, train_res_dir, plot) {
   mat_xgb = obj@EvaluateResult$XGBoost$ConfusionMatrix$table
 
   plot_matrix(
-    comparison_key = comparison_key,
+    combination_key = combination_key,
     mat_rf = mat_rf,
     mat_xgb = mat_xgb,
     out_dir = mat_dir,
@@ -494,13 +512,13 @@ extract_training <- function(mod, train_res_dir, plot) {
   return(list( 
     
     meta = list(
-      train_name = meta$comparison,
+      train_name = meta$combination,
       train_cohort = meta$cohort,
-      train_disease = meta$disease,
-      val_name = meta$comparison,
+      train_condition = meta$condition,
+      val_name = meta$combination,
       val_cohort = meta$cohort,
-      val_disease = meta$disease,
-      comparison_type = "same_cohort_same_disease",
+      val_condition = meta$condition,
+      matched_scenario = "both",
       relationship = "internal",
       n_case = n_case,
       n_control = n_control,
@@ -513,7 +531,7 @@ extract_training <- function(mod, train_res_dir, plot) {
         ci_lower = as.numeric(auc$ci_rf[1]),
         ci_higher = as.numeric(auc$ci_rf[3]),
         pr_auc = auc$pr_auc_rf,
-        brier = brier_rf,
+        bs = bs_rf,
         accuracy = as.numeric(obj@EvaluateResult$RF$conf.matrix$overall[1]),
         balanced_accuracy = as.numeric(obj@EvaluateResult$RF$BalancedAccuracy),
         classification_error = (1 - as.numeric(obj@EvaluateResult$RF$BalancedAccuracy)),
@@ -529,7 +547,7 @@ extract_training <- function(mod, train_res_dir, plot) {
         ci_lower = as.numeric(auc$ci_xgb[1]),
         ci_higher = as.numeric(auc$ci_xgb[3]),
         pr_auc = auc$pr_auc_xgb,
-        brier = brier_xgb,
+        bs = bs_xgb,
         accuracy = as.numeric(obj@EvaluateResult$XGBoost$ConfusionMatrix$overall[1]),
         balanced_accuracy = as.numeric(obj@EvaluateResult$XGBoost$BalancedAccuracy),
         classification_error = (1 - as.numeric(obj@EvaluateResult$XGBoost$BalancedAccuracy)),
@@ -590,7 +608,7 @@ extract_validation <- function(mod, train_res, val_res_dir, plot) {
   for (i in seq_along(val$val_cohort)) {
     
     val_key <- paste(
-      meta$comparison, val$val_cohort[i], val$val_disease[i], sep = "_")
+      meta$combination, val$val_cohort[i], val$val_condition[i], sep = "_")
     
     val_rf <- obj@PredictResult$RF[[val$val_name[i]]]
     val_xgb <- obj@PredictResult$XGBoost[[val$val_name[i]]]
@@ -603,31 +621,31 @@ extract_validation <- function(mod, train_res, val_res_dir, plot) {
         class = train_labels,
         n = Freq)
     
-    n_case <- sample_counts$n[sample_counts$class == "disease"]
+    n_case <- sample_counts$n[sample_counts$class == "case"]
     n_control <- sample_counts$n[sample_counts$class == "control"]
     n_outlier <- length(obj@OutlierSamples)
     
     # Extract predictions data
     y_true = val_rf$predictions$True_label
-    y_prob_rf = val_rf$predictions$disease
-    y_prob_xgb = val_xgb$predictions$disease
+    y_prob_rf = val_rf$predictions$condition
+    y_prob_xgb = val_xgb$predictions$condition
     
     # Plot ROC-AUC and PR-AUC
     auc <- calculate_auc(
-      comparison_key = val_key,
+      combination_key = val_key,
       y_true = y_true,
       y_prob_rf = y_prob_rf,
       y_prob_xgb = y_prob_xgb,
       out_dir = auc_dir,
       plot = plot)
 
-    # Calculate Brier score
-    brier_rf <- calculate_brier(y_true, y_prob_rf)
-    brier_xgb <- calculate_brier(y_true, y_prob_xgb)
+    # Calculate BS
+    bs_rf <- calculate_bs(y_true, y_prob_rf)
+    bs_xgb <- calculate_bs(y_true, y_prob_xgb)
 
     # Plot calibration curve
     cal <- plot_calibration(
-      comparison_key = val_key,
+      combination_key = val_key,
       y_true = y_true,
       y_prob_rf = y_prob_rf,
       y_prob_xgb = y_prob_xgb,
@@ -639,25 +657,23 @@ extract_validation <- function(mod, train_res, val_res_dir, plot) {
     mat_xgb = val_xgb$conf.matrix$table
     
     plot_matrix(
-      comparison_key = val_key,
+      combination_key = val_key,
       mat_rf = mat_rf,
       mat_xgb = mat_xgb,
       out_dir = mat_dir,
       plot = plot)
-    
-    # TODO extract case v control sample size for figures
     
     val_res[[val_key]] <- list(
       
       meta = list(
         train_name = val$train_name[i],
         train_cohort = val$train_cohort[i],
-        train_disease = val$train_disease[i],
+        train_condition = val$train_condition[i],
         val_name = val$val_name[i],
         val_cohort = val$val_cohort[i],
-        val_disease = val$val_disease[i],
-        comparison_type = val$comparison_type[i],
-        relationship = get_relationship(val$train_disease[i], val$val_disease[i]),
+        val_condition = val$val_condition[i],
+        matched_scenario = val$matched_scenario[i],
+        relationship = get_relationship(val$train_condition[i], val$val_condition[i]),
         n_case = n_case,
         n_control = n_control,
         n_outlier = n_outlier),
@@ -669,7 +685,7 @@ extract_validation <- function(mod, train_res, val_res_dir, plot) {
           ci_lower = as.numeric(auc$ci_rf[1]),
           ci_higher = as.numeric(auc$ci_rf[3]),
           pr_auc = auc$pr_auc_rf,
-          brier = brier_rf,
+          bs = bs_rf,
           accuracy = as.numeric(val_rf$conf.matrix$overall[1]),
           balanced_accuracy = as.numeric(val_rf$BalancedAccuracy),
           classification_error = (1 - as.numeric(val_rf$BalancedAccuracy)),
@@ -685,7 +701,7 @@ extract_validation <- function(mod, train_res, val_res_dir, plot) {
           ci_lower = as.numeric(auc$ci_xgb[1]),
           ci_higher = as.numeric(auc$ci_xgb[3]),
           pr_auc = auc$pr_auc_xgb,
-          brier = brier_xgb,
+          bs = bs_xgb,
           accuracy = as.numeric(val_xgb$conf.matrix$overall[1]),
           balanced_accuracy = as.numeric(val_xgb$BalancedAccuracy),
           classification_error = (1 - as.numeric(val_xgb$BalancedAccuracy)),
@@ -712,8 +728,8 @@ extract_validation <- function(mod, train_res, val_res_dir, plot) {
         
         predictions = list(
           y_true = y_true,
-          y_prob_rf = val_rf$predictions$disease,
-          y_prob_xgb = val_xgb$predictions$disease),
+          y_prob_rf = val_rf$predictions$condition,
+          y_prob_xgb = val_xgb$predictions$condition),
         
         objects = list(
           rf = val_rf,
@@ -728,9 +744,9 @@ analyse_training <- function(train_res, train_res_dir) {
   
   train_analysis <- list()
 
-  for (comparison_key in names(train_res)) {
+  for (combination_key in names(train_res)) {
     
-    training <- train_res[[comparison_key]]
+    training <- train_res[[combination_key]]
     meta <- training$meta
     results <- training$results
     data <- training$data
@@ -751,69 +767,51 @@ analyse_training <- function(train_res, train_res_dir) {
     roc_ci_upper = as.numeric(delong_res$conf.int[2]),
     roc_pval = as.numeric(delong_res$p.value),
     delta_pr_auc = results$rf$pr_auc  - results$xgb$pr_auc,
-    delta_brier = results$rf$brier  - results$xgb$brier,
+    delta_bs = results$rf$bs  - results$xgb$bs,
     delta_balanced_accuracy = results$rf$balanced_accuracy  - results$xgb$balanced_accuracy,
     delta_sensitivity = results$rf$sensitivity  - results$xgb$sensitivity,
     delta_precision = results$rf$precision  - results$xgb$precision,
     delta_f1 = results$rf$f1  - results$xgb$f1)
   
-  train_analysis[[comparison_key]] <- c(meta, analysis_res)
+  train_analysis[[combination_key]] <- c(meta, analysis_res)
     
   }
   
   analysed_df <- do.call(rbind, lapply(train_analysis, as.data.frame))
   
-  # TODO simplify
-
   # Calculate delta quartiles
-  roc_quartiles <- quantile(
-    analysed_df$delta_roc_auc, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  metric_cols <- c(
+    "delta_roc_auc",
+    "delta_pr_auc",
+    "delta_bs",
+    "delta_balanced_accuracy",
+    "delta_sensitivity",
+    "delta_precision",
+    "delta_f1")
   
-  pr_quartiles <- quantile(
-    analysed_df$delta_pr_auc, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  quartiles <- lapply(
+    analysed_df[metric_cols],
+    quantile,
+    probs = c(0.25, 0.5, 0.75),
+    na.rm = TRUE)
   
-  brier_quartiles <- quantile(
-    analysed_df$delta_brier, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
-  
-  balanced_accuracy_quartiles <- quantile(
-    analysed_df$delta_balanced_accuracy, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
-  
-  sensitivity_quartiles <- quantile(
-    analysed_df$delta_sensitivity, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
-  
-  precision_quartiles <- quantile(
-    analysed_df$delta_precision, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
-  
-  f1_quartiles <- quantile(
-    analysed_df$delta_f1, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  names(quartiles) <- metric_cols
   
   # Test whether median metrics are different from zero
-  wilcox_roc <- wilcox.test(
-    analysed_df$delta_roc_auc, mu = 0, alternative = "two.sided", exact = FALSE)
+  wilcox_results <- lapply(
+    analysed_df[metric_cols],
+    wilcox.test,
+    mu = 0,
+    alternative = "two.sided",
+    exact = FALSE)
   
-  wilcox_pr <- wilcox.test(
-    analysed_df$delta_pr_auc, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_brier <- wilcox.test(
-    analysed_df$delta_brier, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_balanced_accuracy <- wilcox.test(
-    analysed_df$delta_balanced_accuracy, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_sensitivity <- wilcox.test(
-    analysed_df$delta_sensitivity, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_precision <- wilcox.test(
-    analysed_df$delta_precision, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_f1 <- wilcox.test(
-    analysed_df$delta_f1, mu = 0, alternative = "two.sided", exact = FALSE)
+  names(wilcox_results) <- metric_cols
   
   # FDR correction 
   p_values <- list(
     roc_auc = wilcox_roc$p.value,
     pr_auc = wilcox_pr$p.value,
-    brier = wilcox_brier$p.value,
+    bs = wilcox_bs$p.value,
     balanced_accuracy = wilcox_balanced_accuracy$p.value,
     sensitivity = wilcox_sensitivity$p.value,
     precision = wilcox_precision$p.value,
@@ -822,23 +820,10 @@ analyse_training <- function(train_res, train_res_dir) {
   p_adj <- p.adjust(p_values, method = "fdr")
   p_adj <- as.list(p_adj)
   
-  # TODO determine if this is needed Calculate mean and CIs
-  # mean(analysed_df$delta_roc_auc)
-  # sd(analysed_df$delta_roc_auc)
-  # roc_ttest <- t.test(analysed_df$delta_roc_auc)$conf.int
-  # 
-  # mean(analysed_df$delta_pr_auc)
-  # sd(analysed_df$delta_pr_auc)
-  # pr_ttest <- t.test(analysed_df$delta_pr_auc)$conf.int
-  # 
-  # mean(analysed_df$delta_brier)
-  # sd(analysed_df$delta_brier)
-  # brier_ttest <- t.test(analysed_df$delta_brier)$conf.int
-  
   # Calculate percentages of XGB wins
   pct_xgb_roc_win <- mean(analysed_df$delta_roc_auc < 0, na.rm = TRUE) * 100
   pct_xgb_pr_win <- mean(analysed_df$delta_pr_auc < 0, na.rm = TRUE) * 100
-  pct_xgb_brier_win <- mean(analysed_df$delta_brier > 0, na.rm = TRUE) * 100
+  pct_xgb_bs_win <- mean(analysed_df$delta_bs > 0, na.rm = TRUE) * 100
   
   analysed_summary <- list(
     nrow = nrow(analysed_df),
@@ -848,9 +833,9 @@ analyse_training <- function(train_res, train_res_dir) {
     iqr1_delta_pr_auc = pr_quartiles["25%"], 
     median_delta_pr_auc = pr_quartiles["50%"], 
     iqr3_delta_pr_auc = pr_quartiles["75%"], 
-    iqr1_delta_brier = brier_quartiles["25%"], 
-    median_delta_brier = brier_quartiles["50%"], 
-    iqr3_delta_brier = brier_quartiles["75%"], 
+    iqr1_delta_bs = bs_quartiles["25%"], 
+    median_delta_bs = bs_quartiles["50%"], 
+    iqr3_delta_bs = bs_quartiles["75%"], 
     iqr1_delta_balanced_accuracy = balanced_accuracy_quartiles["25%"], 
     median_delta_balanced_accuracy = balanced_accuracy_quartiles["50%"], 
     iqr3_delta_balanced_accuracy = balanced_accuracy_quartiles["75%"], 
@@ -868,8 +853,8 @@ analyse_training <- function(train_res, train_res_dir) {
     roc_padj = p_adj$roc_auc,
     pr_pval = p_values$pr_auc,
     pr_padj = p_adj$pr_auc,
-    brier_pval = p_values$brier,
-    brier_padj = p_adj$brier,
+    bs_pval = p_values$bs,
+    bs_padj = p_adj$bs,
     balanced_accuracy_pval = p_values$balanced_accuracy,
     balanced_accuracy_padj = p_adj$balanced_accuracy,
     sensitivity_pval = p_values$sensitivity,
@@ -881,14 +866,7 @@ analyse_training <- function(train_res, train_res_dir) {
     
     pct_xgb_roc_win = pct_xgb_roc_win,
     pct_xgb_pr_win = pct_xgb_pr_win,
-    pct_xgb_brier_win = pct_xgb_brier_win
-    # roc_ttest_lower = roc_ttest[1],
-    # roc_ttest_higher = roc_ttest[2],
-    # pr_ttest_lower = pr_ttest[1],
-    # pr_ttest_higher = pr_ttest[2],
-    # brier_ttest_lower = brier_ttest[1],
-    # brier_ttest_higher = brier_ttest[2])
-  )
+    pct_xgb_bs_win = pct_xgb_bs_win)
   
   # Save analysis data frame as csv
   write.csv(
@@ -923,9 +901,9 @@ analyse_validation <- function(val_res, val_res_dir) {
   
   val_analysis <- list()
   
-  for (comparison_key in names(val_res)) {
+  for (combination_key in names(val_res)) {
     
-    validation <- val_res[[comparison_key]]
+    validation <- val_res[[combination_key]]
     meta <- validation$meta
     results <- validation$results
     data <- validation$data
@@ -946,66 +924,50 @@ analyse_validation <- function(val_res, val_res_dir) {
       roc_ci_upper = as.numeric(delong_res$conf.int[2]),
       roc_pval = as.numeric(delong_res$p.value),
       delta_pr_auc = results$rf$pr_auc  - results$xgb$pr_auc,
-      delta_brier = results$rf$brier  - results$xgb$brier,
+      delta_bs = results$rf$bs  - results$xgb$bs,
       delta_balanced_accuracy = results$rf$balanced_accuracy  - results$xgb$balanced_accuracy,
       delta_sensitivity = results$rf$sensitivity  - results$xgb$sensitivity,
       delta_precision = results$rf$precision  - results$xgb$precision,
       delta_f1 = results$rf$f1  - results$xgb$f1)
     
-    val_analysis[[comparison_key]] <- c(meta, analysis_res)
+    val_analysis[[combination_key]] <- c(meta, analysis_res)
   }
   
   analysed_df <- do.call(rbind, lapply(val_analysis, as.data.frame))
   
   # Calculate delta quartiles
-  roc_quartiles <- quantile(
-    analysed_df$delta_roc_auc, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  metric_cols <- c(
+    "delta_roc_auc",
+    "delta_pr_auc",
+    "delta_bs",
+    "delta_balanced_accuracy",
+    "delta_sensitivity",
+    "delta_precision",
+    "delta_f1")
   
-  pr_quartiles <- quantile(
-    analysed_df$delta_pr_auc, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  quartiles <- lapply(
+    analysed_df[metric_cols],
+    quantile,
+    probs = c(0.25, 0.5, 0.75),
+    na.rm = TRUE)
   
-  brier_quartiles <- quantile(
-    analysed_df$delta_brier, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
-  
-  balanced_accuracy_quartiles <- quantile(
-    analysed_df$delta_balanced_accuracy, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
-  
-  sensitivity_quartiles <- quantile(
-    analysed_df$delta_sensitivity, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
-  
-  precision_quartiles <- quantile(
-    analysed_df$delta_precision, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
-  
-  f1_quartiles <- quantile(
-    analysed_df$delta_f1, probs = c(0.25, 0.5, 0.75), na.rm = TRUE)
+  names(quartiles) <- metric_cols
   
   # Test whether median metrics are different from zero
-  wilcox_roc <- wilcox.test(
-    analysed_df$delta_roc_auc, mu = 0, alternative = "two.sided", exact = FALSE)
+  wilcox_results <- lapply(
+    analysed_df[metric_cols],
+    wilcox.test,
+    mu = 0,
+    alternative = "two.sided",
+    exact = FALSE)
   
-  wilcox_pr <- wilcox.test(
-    analysed_df$delta_pr_auc, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_brier <- wilcox.test(
-    analysed_df$delta_brier, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_balanced_accuracy <- wilcox.test(
-    analysed_df$delta_balanced_accuracy, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_sensitivity <- wilcox.test(
-    analysed_df$delta_sensitivity, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_precision <- wilcox.test(
-    analysed_df$delta_precision, mu = 0, alternative = "two.sided", exact = FALSE)
-  
-  wilcox_f1 <- wilcox.test(
-    analysed_df$delta_f1, mu = 0, alternative = "two.sided", exact = FALSE)
+  names(wilcox_results) <- metric_cols
   
   # FDR correction 
   p_values <- list(
     roc_auc = wilcox_roc$p.value,
     pr_auc = wilcox_pr$p.value,
-    brier = wilcox_brier$p.value,
+    bs = wilcox_bs$p.value,
     balanced_accuracy = wilcox_balanced_accuracy$p.value,
     sensitivity = wilcox_sensitivity$p.value,
     precision = wilcox_precision$p.value,
@@ -1018,7 +980,7 @@ analyse_validation <- function(val_res, val_res_dir) {
   p_values <- list(
     roc_auc = wilcox_roc$p.value,
     pr_auc = wilcox_pr$p.value,
-    brier = wilcox_brier$p.value,
+    bs = wilcox_bs$p.value,
     balanced_accuracy = wilcox_balanced_accuracy$p.value,
     sensitivity = wilcox_sensitivity$p.value,
     precision = wilcox_precision$p.value,
@@ -1026,24 +988,11 @@ analyse_validation <- function(val_res, val_res_dir) {
   
   p_adj <- p.adjust(p_values, method = "fdr")
   p_adj <- as.list(p_adj)
-  
-  # Calculate mean and CIs
-  # mean(analysed_df$delta_roc_auc)
-  # sd(analysed_df$delta_roc_auc)
-  # roc_ttest <- t.test(analysed_df$delta_roc_auc)$conf.int
-  # 
-  # mean(analysed_df$delta_pr_auc)
-  # sd(analysed_df$delta_pr_auc)
-  # pr_ttest <- t.test(analysed_df$delta_pr_auc)$conf.int
-  # 
-  # mean(analysed_df$delta_brier)
-  # sd(analysed_df$delta_brier)
-  # brier_ttest <- t.test(analysed_df$delta_brier)$conf.int
   
   # Calculate percentages of XGB wins
   pct_xgb_roc_win <- mean(analysed_df$delta_roc_auc < 0, na.rm = TRUE) * 100
   pct_xgb_pr_win <- mean(analysed_df$delta_pr_auc < 0, na.rm = TRUE) * 100
-  pct_xgb_brier_win <- mean(analysed_df$delta_brier > 0, na.rm = TRUE) * 100
+  pct_xgb_bs_win <- mean(analysed_df$delta_bs > 0, na.rm = TRUE) * 100
   
   analysed_summary <- list(
     nrow = nrow(analysed_df),
@@ -1053,9 +1002,9 @@ analyse_validation <- function(val_res, val_res_dir) {
     iqr1_delta_pr_auc = pr_quartiles["25%"], 
     median_delta_pr_auc = pr_quartiles["50%"], 
     iqr3_delta_pr_auc = pr_quartiles["75%"], 
-    iqr1_delta_brier = brier_quartiles["25%"], 
-    median_delta_brier = brier_quartiles["50%"], 
-    iqr3_delta_brier = brier_quartiles["75%"], 
+    iqr1_delta_bs = bs_quartiles["25%"], 
+    median_delta_bs = bs_quartiles["50%"], 
+    iqr3_delta_bs = bs_quartiles["75%"], 
     iqr1_delta_balanced_accuracy = balanced_accuracy_quartiles["25%"], 
     median_delta_balanced_accuracy = balanced_accuracy_quartiles["50%"], 
     iqr3_delta_balanced_accuracy = balanced_accuracy_quartiles["75%"], 
@@ -1073,8 +1022,8 @@ analyse_validation <- function(val_res, val_res_dir) {
     roc_padj = p_adj$roc_auc,
     pr_pval = p_values$pr_auc,
     pr_padj = p_adj$pr_auc,
-    brier_pval = p_values$brier,
-    brier_padj = p_adj$brier,
+    bs_pval = p_values$bs,
+    bs_padj = p_adj$bs,
     balanced_accuracy_pval = p_values$balanced_accuracy,
     balanced_accuracy_padj = p_adj$balanced_accuracy,
     sensitivity_pval = p_values$sensitivity,
@@ -1086,9 +1035,7 @@ analyse_validation <- function(val_res, val_res_dir) {
     
     pct_xgb_roc_win = pct_xgb_roc_win,
     pct_xgb_pr_win = pct_xgb_pr_win,
-    pct_xgb_brier_win = pct_xgb_brier_win
-  )
-  
+    pct_xgb_bs_win = pct_xgb_bs_win)
   
   # Save analysis data frame as csv
   write.csv(
@@ -1168,34 +1115,34 @@ analyse_by_categories <- function(
   
   message(" > Combined training and validation results saved to: ", stat_res_dir)
   
-  # Creating data frame for comparison type analysis
+  # Creating data frame for matched scenario analysis
   combo_wide <- combo_results_df %>%
     select(
-      train_name, val_name, comparison_type, relationship,
-      n_case, n_control, n_outlier, mod, roc_auc, pr_auc, brier) %>%
+      train_name, val_name, matched_scenario, relationship,
+      n_case, n_control, n_outlier, mod, roc_auc, pr_auc, bs) %>%
     pivot_wider(
       names_from = mod,
-      values_from = c(roc_auc, pr_auc, brier),
+      values_from = c(roc_auc, pr_auc, bs),
       names_sep = "_") %>%
     mutate(
       delta_roc_auc = roc_auc_RF - roc_auc_XGB,
       delta_pr_auc = pr_auc_RF - pr_auc_XGB,
-      delta_brier = brier_RF - brier_XGB)
+      delta_bs = bs_RF - bs_XGB)
   
-  metrics <- c("roc_auc", "pr_auc", "brier")
+  metrics <- c("roc_auc", "pr_auc", "bs")
   models <- c("RF", "XGB")
   
-  message(" > Testing difference in RF/XGB performance across comparison types")
+  message(" > Testing difference in RF/XGB performance across matched scenarios")
   
   kruskal_res <- list(
     roc = list(),
     pr = list(),
-    brier = list())
+    bs = list())
   
   for (model in models) {
     for (metric in metrics) {
       formula <- as.formula(
-        paste0(metric, "_", model, " ~ comparison_type"))
+        paste0(metric, "_", model, " ~ matched_scenario"))
       
       test <- kruskal.test(
         formula,
@@ -1249,7 +1196,7 @@ analyse_by_categories <- function(
     for (model in models) {
       
       formula <- as.formula(
-        paste0(metric, "_", model, " ~ comparison_type"))
+        paste0(metric, "_", model, " ~ matched_scenario"))
       
       dunn_test <- dunnTest(
         formula,
@@ -1289,18 +1236,18 @@ analyse_by_categories <- function(
   
   message("   - post-hoc results saved as: ", fn)
   
-  message(" > Testing difference in median ΔRF-XGB within comparison types")
+  message(" > Testing difference in median ΔRF-XGB within matched scenarios")
   
   wilcox_res <- list(
     roc = list(),
     pr = list(),
-    brier = list())
+    bs = list())
   
-  for (type in unique(combo_wide$comparison_type)) {
+  for (type in unique(combo_wide$matched_scenario)) {
     
     tmp <- subset(
       combo_wide,
-      comparison_type == type)
+      matched_scenario == type)
     
     roc_res <- wilcox.test(
       delta_roc_auc ~ 1,
@@ -1314,8 +1261,8 @@ analyse_by_categories <- function(
       mu = 0,
       conf.int = TRUE)
     
-    brier_res <- wilcox.test(
-      delta_brier ~ 1,
+    bs_res <- wilcox.test(
+      delta_bs ~ 1,
       data = tmp,
       mu = 0,
       conf.int = TRUE)
@@ -1332,11 +1279,11 @@ analyse_by_categories <- function(
       ci_lower = pr_res$conf.int[1],
       ci_higher = pr_res$conf.int[2])
     
-    wilcox_res$brier[[type]] <- list(
-      median_delta = median(tmp$delta_brier, na.rm = TRUE),
-      p_value = brier_res$p.value,
-      ci_lower = brier_res$conf.int[1],
-      ci_higher = brier_res$conf.int[2])
+    wilcox_res$bs[[type]] <- list(
+      median_delta = median(tmp$delta_bs, na.rm = TRUE),
+      p_value = bs_res$p.value,
+      ci_lower = bs_res$conf.int[1],
+      ci_higher = bs_res$conf.int[2])
   }
   
   # FDR correction within each metric
@@ -1348,15 +1295,15 @@ analyse_by_categories <- function(
     sapply(wilcox_res$pr, `[[`, "p_value"),
     method = "fdr")
   
-  brier_adj <- p.adjust(
-    sapply(wilcox_res$brier, `[[`, "p_value"),
+  bs_adj <- p.adjust(
+    sapply(wilcox_res$bs, `[[`, "p_value"),
     method = "fdr")
   
   for (type in names(wilcox_res$roc)) {
     
     wilcox_res$roc[[type]]$p_adj <- unname(roc_adj[type])
     wilcox_res$pr[[type]]$p_adj <- unname(pr_adj[type])
-    wilcox_res$brier[[type]]$p_adj <- unname(brier_adj[type])
+    wilcox_res$bs[[type]]$p_adj <- unname(bs_adj[type])
   }
   
   names(wilcox_res) <- metrics
@@ -1371,7 +1318,7 @@ analyse_by_categories <- function(
           
           data.frame(
             metric = metric,
-            comparison_type = type,
+            matched_scenario = type,
             median_delta = wilcox_res[[metric]][[type]]$median_delta,
             p_value = wilcox_res[[metric]][[type]]$p_value,
             p_adj = wilcox_res[[metric]][[type]]$p_adj,
@@ -1390,11 +1337,11 @@ analyse_by_categories <- function(
   
   message("   - results saved as: ", fn)
   
-  message(" > Testing difference in median ΔRF-XGB across comparison types")
+  message(" > Testing difference in median ΔRF-XGB across matched scenarios")
   
   delta_kruskal_res <- lapply(metrics, function(metric) {
     res <- kruskal.test(
-      combo_wide[[paste0("delta_", metric)]] ~ combo_wide$comparison_type)
+      combo_wide[[paste0("delta_", metric)]] ~ combo_wide$matched_scenario)
     
     list(
       statistic = unname(res$statistic),
@@ -1407,7 +1354,7 @@ analyse_by_categories <- function(
   pairwise_res <- lapply(metrics, function(metric) {
     res <- pairwise.wilcox.test(
       combo_wide[[paste0("delta_", metric)]],
-      combo_wide$comparison_type,
+      combo_wide$matched_scenario,
       p.adjust.method = "BH")
     
     res$p.value
@@ -1431,7 +1378,7 @@ analyse_by_categories <- function(
     lapply(names(pairwise_res), function(metric) {
       df <- as.data.frame(as.table(pairwise_res[[metric]]))
       colnames(df) <- c(
-        "comparison_type_1", "comparison_type_2", "p_adj")
+        "matched_scenario_1", "matched_scenario_2", "p_adj")
       df$metric <- metric
       df[!is.na(df$p_adj), ]
     }))
@@ -1582,7 +1529,7 @@ analyse_by_categories <- function(
   rel_kruskal_res <- list(
     roc = list(),
     pr = list(),
-    brier = list())
+    bs = list())
   
   for (model in models) {
     for (metric in metrics) {
@@ -1729,19 +1676,19 @@ analyse_by_categories <- function(
   
   message("   - results saved as: ", fn)
   
-  message("\nSummarising statistics across comparison types")
+  message("\nSummarising statistics across matched scenarios")
   message(" > Calculating effects sizes")
   
   effect_summary <- combo_wide_num %>%
-    group_by(comparison_type) %>%
+    group_by(matched_scenario) %>%
     summarise(
       n = n(),
       median_delta_roc_auc = median(delta_roc_auc, na.rm = TRUE),
       IQR_delta_roc_auc = IQR(delta_roc_auc, na.rm = TRUE),
       median_delta_pr_auc = median(delta_pr_auc, na.rm = TRUE),
       IQR_delta_pr_auc = IQR(delta_pr_auc, na.rm = TRUE),
-      median_delta_brier = median(delta_brier, na.rm = TRUE),
-      IQR_delta_brier = IQR(delta_brier, na.rm = TRUE))
+      median_delta_bs = median(delta_bs, na.rm = TRUE),
+      IQR_delta_bs = IQR(delta_bs, na.rm = TRUE))
   
   fn <- "8. effect_summary.csv"
   
@@ -1755,11 +1702,11 @@ analyse_by_categories <- function(
   message(" > Calculating variances")
   
   variance <- combo_results_df %>%
-    group_by(mod, comparison_type) %>%
+    group_by(mod, matched_scenario) %>%
     summarise(
       sd_roc = sd(roc_auc, na.rm = TRUE),
       sd_pr = sd(pr_auc, na.rm = TRUE),
-      sd_brier = sd(brier, na.rm = TRUE),
+      sd_bs = sd(bs, na.rm = TRUE),
       .groups = "drop")
   
   fn <- "9. variance_summary.csv"
@@ -1812,16 +1759,13 @@ run_analysis <- function(
     recursive = TRUE,
     showWarnings = FALSE)
   
-  # Confirm all comparisons have been evaluated
+  # Confirm all combinations have been evaluated
   missing <- check_results(prep_dir, in_dir)
   
   # Combine training and validation logs
   if (length(missing) != 0) {
-
-    message("Evaluate all comparisons before combining logs")
-    next
-
-  } else {
+    stop("Evaluate all combinations before combining logs")
+  }
 
   train_dir <- file.path(in_dir, "training_log")
 
@@ -1838,7 +1782,6 @@ run_analysis <- function(
     out_file = "validation_log.csv")
 
   message("Combined training and validation logs written to: ", out_dir)
-  }
   
   # Read final models
   models <-  list.files(
@@ -1855,7 +1798,7 @@ run_analysis <- function(
     mod <- readRDS(file)
     
     # Extract training results
-    message("\nAccessing model: ", mod$metadata$comparison)
+    message("\nAccessing model: ", mod$metadata$combination)
     
     train <- extract_training(mod, train_res_dir, plot)
     train_res[[train$meta$train_name]] <- train
@@ -1925,3 +1868,4 @@ run_analysis <- function(
 
 # Execute ----------------------------------------------------------------------
 analysis_res <- run_analysis(prep_dir, in_dir, out_dir, plot = FALSE)
+

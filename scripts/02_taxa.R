@@ -93,21 +93,21 @@ process_combination <- function(
   counts <- as.list(table(meta[[condition_col]]))
   counts <- as.list(table(meta[[condition_col]]))
   
-  n_controls <- counts[["control"]] %||% 0
-  n_conditions <- counts[[condition]] %||% 0
+  n_control <- counts[["control"]] %||% 0
+  n_condition <- counts[[condition]] %||% 0
   
   n_status <- character()
   
-  if (n_controls < n_status_thresh) {
+  if (n_control < n_status_thresh) {
     n_status <- c(n_status, paste0("n controls < ", n_status_thresh))
   }
   
-  if (n_conditions < n_status_thresh) {
+  if (n_condition < n_status_thresh) {
     n_status <- c(n_status, paste0("n ", condition, " < ", n_status_thresh))
   }
   
   n_status <- if (length(n_status) == 0) {
-    NA_character_
+    "OK"
   } else {
     paste(n_status, collapse = " | ")
   }
@@ -124,8 +124,8 @@ process_combination <- function(
       class_imbalance = class_imbalance,
       age_ratio = age_ratio,
       age_imbalance = age_imbalance,
-      n_controls = n_controls,
-      n_conditions = n_conditions,
+      n_control = n_control,
+      n_condition = n_condition,
       n_status = n_status)))
   }
 
@@ -139,7 +139,7 @@ conduct_lefse <- function(
     seed = 1234) {
   
   # Skip if sample size is insufficient
-  if (!is.na(processed$qc$n_status)) {
+  if (processed$qc$n_status != "OK") {
     message("  - skipped: insufficient sample size")
     
     processed$qc$lefse_status <- "insufficient sample size"
@@ -249,20 +249,24 @@ conduct_lefse <- function(
   
   # Determine status
   if (is.null(result_df) || nrow(result_df) == 0) {
-    lefse_status <- "no results"
-    n_features <- 0
+    
+    processed$qc$lefse_status <- "no results"
+    processed$qc$n_features <- 0
+    processed$qc$plot_status <- "no LEfSe results"
     processed$lefse <- NULL
     
   } else {
+    
     processed$qc$lefse_status <- "SUCCESS"
     processed$qc$n_features <- nrow(result_df)
+    
     processed$lefse <- cbind(
       data.frame(
         combination = processed$qc$combination,
         cohort = processed$qc$cohort_name,
         condition = processed$qc$condition,
         stringsAsFactors = FALSE),
-      result_df )
+      result_df)
   }
   
   return(processed)
@@ -316,8 +320,8 @@ plot_lefse <- function(
   # Skip if no valid scores
   if (nrow(df) == 0) {
     message("  - plot skipped: no valid scores")
-    lefse_result$qc$plot_status <- "no valid scores"
-    return(lefse_result)
+    analysed$qc$plot_status <- "no valid scores"
+    return(analysed)
   }
   
   # Create plot
@@ -376,14 +380,46 @@ plot_lefse <- function(
     height = plot_height,
     device = "pdf")
   
-  lefse_result$qc$plot_status <- "SUCCESS"
+  analysed$qc$plot_status <- "SUCCESS"
   message("  - plot saved: ", safe_combination, ".pdf")
   
   invisible(p)
   
-  return(lefse_result)
+  return(analysed)
 }
 
+
+analyse_lefse <- function(lefse_res) {
+  
+  # All features
+  all_features <- lefse_res %>%
+    group_by(features) %>%
+    summarise(
+      n_condition = n_distinct(condition),
+      conditions = paste(unique(condition), collapse = ", "),
+      n_cohort = n_distinct(cohort),
+      cohorts = paste(unique(cohort), collapse = ", "),
+      scores = mean(scores)
+    ) %>%
+    arrange(desc(n_condition))
+  
+  # Find features unique to conditions
+  unique_features <- lefse_res %>%
+    group_by(features) %>%
+    summarise(
+      n_condition = n_distinct(condition),
+      n_cohort = n_distinct(cohort),
+      conditions = paste(unique(condition), collapse = ", "),
+      cohorts = paste(unique(cohort), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    filter(n_condition == 1)
+  
+  return(list(
+    all_features = all_features,
+    unique_features = unique_features))
+  
+}
 
 # Define main function ---------------------------------------------------------
 run_analysis <- function(cohorts, out_dir) {
@@ -399,7 +435,7 @@ run_analysis <- function(cohorts, out_dir) {
     cohort <- cohorts[[cohort_name]]
     info <- process_conditions(cohort)
     
-    message("\n", cohort_name, ": control vs ", info$n_conditions, " condition/s")
+    message("\n", cohort_name, ": control vs ", info$n_condition, " condition/s")
     
     # Check cohort contains both case and control samples
     validation <- validate_conditions(info, cohort_name)
@@ -430,9 +466,7 @@ run_analysis <- function(cohorts, out_dir) {
         analysed <- plot_lefse(
           analysed = analysed,
           plot_dir = plot_dir)
-        
-        return(analysed)
-      }
+        }
 
       results[[combination]] <- analysed
     }
@@ -442,9 +476,14 @@ run_analysis <- function(cohorts, out_dir) {
   qc <- dplyr::bind_rows(lapply(results, `[[`, "qc"))
   lefse <- dplyr::bind_rows(lapply(results, `[[`, "lefse"))
   
+  # Analyse LEfSe features
+  analysed <- analyse_lefse(lefse)
+  
   write.csv(contingency, file.path(out_dir, "contingency.csv"), row.names = FALSE)
   write.csv(qc, file.path(out_dir, "qc.csv"), row.names = FALSE)
   write.csv(lefse, file.path(out_dir, "results.csv"), row.names = FALSE)
+  write.csv(analysed$all_features, file.path(out_dir, "all_features.csv"), row.names = FALSE)
+  write.csv(analysed$unique_features, file.path(out_dir, "unique_features.csv"), row.names = FALSE)
  
   message("\nResults saved to: ", out_dir)
   

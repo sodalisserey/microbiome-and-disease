@@ -3,7 +3,7 @@
 # 1. Define output directory and functions
 # 2. Load data using utils.R
 # 3. Execute main function run_analysis() which:
-#   * Runs calculate_dissimilarity(), which:
+#   d. Runs calculate_dissimilarity(), which:
 #         - quantifies Bray-Curtis dissimilarity
 #         - runs PERMANOVA and PERMDISP 
 #         - logs results
@@ -15,6 +15,7 @@
 # Load packages and dependencies -----------------------------------------------
 library(vegan)
 library(ggplot2)
+library(cowplot)
 library(dplyr)
 library(readr)
 library(SummarizedExperiment)
@@ -300,9 +301,7 @@ plot_pcoa <- function(
     theme(
       plot.title = element_blank(),
       aspect.ratio = 1,
-      legend.position = "bottom",
-      legend.justification = "left",
-      legend.direction = "vertical",
+      legend.position = "none",
       axis.text = element_text(size = 15),
       axis.title = element_text(size = 15),
       legend.text = element_text(size = 15),
@@ -310,9 +309,16 @@ plot_pcoa <- function(
     guides(
       colour = guide_legend(ncol = 1))
   
-  n_conditions <- length(condition_levels)
+  p_legend <- p +
+    guides(
+      colour = guide_legend(ncol = 1),
+      fill = guide_legend(ncol = 1)) +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "vertical")
   
-  plot_height <- max(4, 2.5 + n_conditions * 0.2)
+  legend <- get_legend(p_legend)
+  legend_plot <- ggdraw(legend)
   
   ggsave(
     file.path(
@@ -320,7 +326,16 @@ plot_pcoa <- function(
       paste0(cohort_name, ".pdf")),
     plot = p,
     width = 3,
-    height = plot_height,
+    height = 3,
+    units = "in")
+  
+  ggsave(
+    file.path(
+      plot_dir,
+      paste0(cohort_name, "_legend.pdf")),
+    plot = legend_plot,
+    width = 4,
+    height = 6,
     units = "in")
   
   invisible(p)

@@ -1,3 +1,18 @@
+# Generate figures for report visualisation
+
+# 1. Define output directory and functions
+# 2. Load primary.RDS 
+# 3. Execute main function generate_plots() which:
+#   a. runs make_barplot()
+#   b. runs make_scatterplot()
+#   c. runs plot_delta_distribution()
+#   d. runs make_boxplot_ind()
+#   e. runs make_boxplot_delta()
+#   f. runs make_rel_boxplot_abs()
+#   g. runs make_full_heatmap()
+#   h. runs make_condition_heatmap()
+
+
 # Load packages and dependencies -----------------------------------------------
 library(grid)
 library(ggplot2)
@@ -12,7 +27,7 @@ source("R/utils.R")
 
 
 # Define input/output directories ----------------------------------------------
-in_dir <- "results/05_ml_analysis"
+in_dir <- "results/05_analysis"
 out_dir <- "results/06_figures"
 
 
@@ -100,6 +115,7 @@ make_barplot <- function(
         control = "Control"
       )
     ) +
+    scale_x_discrete(labels = function(x) gsub("_", " ", x)) +
     coord_cartesian(
       ylim = c(0, 1.12),
       clip = "off"
@@ -110,9 +126,11 @@ make_barplot <- function(
       axis.text.y = element_text(size = 18),
       axis.title = element_text(size = 18),
       legend.text = element_text(size = 16),
-      legend.title = element_text(size = 18),
+      legend.title = element_blank(),
+      legend.position = "bottom",
+      legend.direction = "horizontal",
       plot.margin = margin(
-        t = 10,   
+        t = 12,   
         r = 10,  
         b = 0,  
         l = 40   
@@ -143,20 +161,15 @@ make_barplot <- function(
       label = n_outlier
     )
   
-  p_outlier <- ggplot(
-    outlier_df,
-    aes(
-      x = train_name,
-      y = n_outlier
-    )
-  ) +
+  p_outlier <- ggplot(outlier_df,
+                      aes(x = train_name, y = n_outlier)) +
     geom_col(
       aes(fill = "Outliers"),
       width = 0.9
     ) +
     scale_fill_manual(
       name = NULL, 
-      values = c(Outliers = "#FCCD4A")
+      values = c(Outliers = "#9AD5D0")
     ) +
     geom_text(
       data = outlier_df,
@@ -171,30 +184,32 @@ make_barplot <- function(
       hjust = 0
     ) +
     scale_x_discrete(
-      expand = c(0, 0)
+      expand = c(0, 0),
+      labels = function(x) gsub("_", " ", x)
     ) +
     coord_cartesian(
       ylim = c(0, 152),
       clip = "off"
     ) +
     labs(
-      y = "Number of outliers",
+      y = "Outliers",
       x = NULL
     ) +
     theme_classic() +
     theme(
-      axis.text.x = element_text(angle = 50, hjust = 1, size = 14),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
       axis.text.y = element_text(size = 18),
-      axis.title = element_text(size = 18),
+      axis.title = element_text(size = 20),
       legend.text = element_text(size = 16),
-      legend.title = element_text(size = 18),
+      legend.title = element_blank(),
+      legend.position = "bottom",
+      legend.direction = "horizontal",
       plot.margin = margin(
-        t = 10,   
-        r = 10,  
-        b = 5,  
-        l = 40
-      )
-    )
+        t = 10,
+        r = 10,
+        b = 5,
+        l = 20
+      ))
   
   ggsave(
     file.path(
@@ -202,29 +217,27 @@ make_barplot <- function(
       "barplot_outliers.pdf"
     ),
     p_outlier,
-    width = 13,
-    height = 5,
-    units = "in"
+    width = 12,
+    height = 4.5
   )
   
   
   relationship_df <- combo_wide %>%
     dplyr::count(relationship) %>%
+    dplyr::filter(relationship != "internal") %>%
     mutate(
       relationship = factor(
         relationship,
         levels = c(
-          "internal",
           "same",
           "continuum",
           "shared",
           "unrelated"
         ),
         labels = c(
-          "Internal",
-          "Same",
-          "Continuum",
-          "Shared",
+          "Matched",
+          "Spectrum",
+          "Related",
           "Unrelated"
         )
       )
@@ -252,7 +265,7 @@ make_barplot <- function(
     ) +
     labs(
       x = NULL,
-      y = "Biological Relationship\n(Counts)"
+      y = "Relationship\n(Counts)"
     ) +
     coord_cartesian(
       ylim = c(0, 826),
@@ -260,7 +273,7 @@ make_barplot <- function(
     ) +
     theme_classic() +
     theme(
-      axis.text.x = element_text(size = 20, angle = 50, hjust = 1),
+      axis.text.x = element_text(angle = 50, hjust = 1, size = 22),
       axis.text.y = element_text(size = 20),
       axis.title = element_text(size = 22),
       legend.text = element_text(size = 16),
@@ -281,21 +294,20 @@ make_barplot <- function(
   )
   
   comparison_df <- combo_wide %>%
-    dplyr::count(comparison_type) %>%
+    dplyr::count(matched_scenario) %>%
+    dplyr::filter(matched_scenario != "both") %>%
     mutate(
-      comparison_type = factor(
-        comparison_type,
+      matched_scenario = factor(
+        matched_scenario,
         levels = c(
-          "same_cohort_same_disease",
-          "cross_cohort_same_disease",
-          "same_cohort_diff_disease",
-          "cross_cohort_diff_disease"
+          "condition",
+          "cohort",
+          "neither"
         ),
         labels = c(
-          "Same\ncohort\nSame disease",
-          "Different\ncohort\nSame disease",
-          "Same\ncohort\nDifferent disease",
-          "Different\ncohort\nDifferent disease"
+          "Condition",
+          "Cohort",
+          "Neither"
         )
       )
     )
@@ -303,7 +315,7 @@ make_barplot <- function(
   p_comparison <-   p_relationship <- ggplot(
     comparison_df,
     aes(
-      x = comparison_type,
+      x = matched_scenario,
       y = n
     )
   ) +
@@ -322,7 +334,7 @@ make_barplot <- function(
     ) +
     labs(
       x = NULL,
-      y = "Comparison Type\n(Counts)"
+      y = "Matched Scenario\n(Counts)"
     ) +
     coord_cartesian(
       ylim = c(0, 1000),
@@ -330,7 +342,7 @@ make_barplot <- function(
     ) +
     theme_classic() +
     theme(
-      axis.text.x = element_text(size = 20),
+      axis.text.x = element_text(angle = 50, hjust = 1, size = 22),
       axis.text.y = element_text(size = 20),
       axis.title = element_text(size = 22),
       legend.text = element_text(size = 16),
@@ -368,12 +380,12 @@ make_scatterplot <- function(
   metric_colours <- c(
     roc_auc = "#419F9B",
     pr_auc  = "#DDA303",
-    brier   = "#B4632D")
+    bs   = "#B4632D")
   
   metric_labels <- c(
     roc_auc = "ROC-AUC",
     pr_auc = "PR-AUC",
-    brier = "Brier Score")
+    bs = "BS")
   
   for (metric in metrics) {
     
@@ -393,11 +405,11 @@ make_scatterplot <- function(
     
     p_label <- case_when(
       p_adj < 0.001 ~ "p-adj < 0.001",
-      TRUE ~ paste0("p-adj = ", sprintf("%.3f", p_adj))
+      TRUE ~ paste0("p-adj = ", sprintf("%.2f", p_adj))
     )
     
     annotation <- paste0(
-      "\nrho = ", sprintf("%.3f", rho),
+      "\nrho = ", sprintf("%.2f", rho),
       "\n", p_label
     )
     
@@ -452,13 +464,13 @@ plot_delta_distribution <- function(stat_results, metrics, out_dir) {
   metric_labels <- c(
     delta_roc_auc = "Delta ROC-AUC",
     delta_pr_auc = "Delta PR-AUC",
-    delta_brier = "Delta Brier Score"
+    delta_bs = "Delta bs"
   )
   
   metric_colours <- c(
     delta_roc_auc = "#419F9B",
     delta_pr_auc = "#DDA303",
-    delta_brier = "#B4632D"
+    delta_bs = "#B4632D"
   )
   
   for (metric in metrics) {
@@ -466,10 +478,12 @@ plot_delta_distribution <- function(stat_results, metrics, out_dir) {
     res_name <- metric
     if (metric == "delta_roc_auc") res_name <- "pct_xgb_roc_win"
     if (metric == "delta_pr_auc")  res_name <- "pct_xgb_pr_win"
-    if (metric == "delta_brier")  res_name <- "pct_xgb_brier_win"
+    if (metric == "delta_bs")  res_name <- "pct_xgb_bs_win"
     
     xgb_win <- train_summary[[res_name]]
-    label <- paste0("XGB wins ", sprintf("%.0f%%", xgb_win))
+    rf_win <- 100 - xgb_win
+    
+    label <- paste0("RF adv. ", sprintf("%.0f%%", rf_win))
     
     delta <- combo_wide[[paste0(metric)]]
     df <- data.frame(delta = delta)
@@ -500,9 +514,9 @@ plot_delta_distribution <- function(stat_results, metrics, out_dir) {
         y = metric_labels[metric]) +
       theme_classic() +
       theme(    
-        axis.text = element_text(size = 14),
-        axis.title = element_text(size = 14),
-        plot.title = element_text(size = 14)) +
+        axis.text = element_text(size = 15),
+        axis.title = element_blank(),
+        plot.title = element_blank()) +
       annotate(
         "text",
         x = 0.425,
@@ -510,18 +524,16 @@ plot_delta_distribution <- function(stat_results, metrics, out_dir) {
         label = label,
         hjust = 1,
         vjust = -0.3,
-        size = 4.3)
+        size = 4.5)
     
     ggsave(
       file.path(out_dir, paste0("delta_distribution_", metric, ".pdf")),
       p,
-      width = 3,
-      height = 3
+      width = 2.7,
+      height = 2.7
     )
   }
 }
-
-plots <- generate_plots(analysis_res, out_dir)
 
 
 make_boxplot_ind <- function(
@@ -536,12 +548,12 @@ make_boxplot_ind <- function(
   metric_labels <- c(
     roc_auc = "ROC-AUC",
     pr_auc = "PR-AUC",
-    brier = "Brier Score")
+    bs = "BS")
   
   y_limits <- list(
-    roc_auc = c(0.4, 1.6),
-    pr_auc = c(0, 1.85),
-    brier = c(0, 1.35))
+    roc_auc = c(0.4, 1.56),
+    pr_auc = c(0, 1.75),
+    bs = c(0, 1.1))
 
   for (metric in metrics) {
     
@@ -552,23 +564,23 @@ make_boxplot_ind <- function(
       filter(!is.na(.data[[metric]])) %>%
       mutate(
         comparison_label = case_when(
-          comparison_type == "same_cohort_same_disease" ~ 
+          matched_scenario == "both" ~ 
             "Internal",
-          comparison_type == "cross_cohort_same_disease" ~ 
-            "Cohort",
-          comparison_type == "same_cohort_diff_disease" ~ 
+          matched_scenario == "condition" ~ 
             "Condition",
-          comparison_type == "cross_cohort_diff_disease" ~ 
-            "Both"),
+          matched_scenario == "cohort" ~ 
+            "Cohort",
+          matched_scenario == "neither" ~ 
+            "Neither"),
         comparison_label = factor(
           comparison_label,
           levels = c(
             "Internal",
-            "Cohort",
             "Condition",
-            "Both")),
+            "Cohort",
+            "Neither")),
         box_colour = if_else(
-          comparison_type == "same_cohort_same_disease",
+          matched_scenario == "both",
           "Internal",
           "Other"))
     
@@ -621,12 +633,12 @@ make_boxplot_ind <- function(
             Internal = "grey50",
             Other = if (model_name == "RF") "#A7AF5A" else "#896C74"
           ),
-          guide = "none"
+          guide = "Neither"
         ) +
         theme_classic() +
         labs(
           title = paste0(model_name, " ", metric_labels[[metric]]),
-          x = "Validation Change/s",
+          x = "Matched Scenario",
           y = metric_labels[[metric]]) +
         scale_y_continuous(
           limits = y_limits[[metric]],
@@ -652,17 +664,17 @@ make_boxplot_ind <- function(
         mutate(
           group1 = recode(
             group1,
-            "same_cohort_same_disease" = "Internal",
-            "cross_cohort_same_disease" = "Cohort",
-            "same_cohort_diff_disease" = "Condition",
-            "cross_cohort_diff_disease" = "Both"
+            "both" = "Internal",
+            "condition" = "Condition",
+            "cohort" = "Cohort",
+            "neither" = "Neither"
           ),
           group2 = recode(
             group2,
-            "same_cohort_same_disease" = "Internal",
-            "cross_cohort_same_disease" = "Cohort",
-            "same_cohort_diff_disease" = "Condition",
-            "cross_cohort_diff_disease" = "Both"
+            "both" = "Internal",
+            "condition" = "Condition",
+            "cohort" = "Cohort",
+            "neither" = "Neither"
           )
         )
       
@@ -678,7 +690,7 @@ make_boxplot_ind <- function(
               ),
             p_label = case_when(
               P.adj < 0.001 ~ "p < 0.001",
-              TRUE ~ paste0("p = ", sprintf("%.3f", P.adj))
+              TRUE ~ paste0("p = ", sprintf("%.2f", P.adj))
             )
           )
         
@@ -705,6 +717,7 @@ make_boxplot_ind <- function(
   }
 }
 
+
 make_boxplot_delta <- function(
     stat_results,
     metrics,
@@ -718,33 +731,33 @@ make_boxplot_delta <- function(
   delta_labels <- c(
     delta_roc_auc = "Delta ROC-AUC",
     delta_pr_auc = "Delta PR-AUC",
-    delta_brier = "Delta Brier Score")
+    delta_bs = "Delta bs")
   
   metric_colours <- c(
     delta_roc_auc = "#419F9B",
     delta_pr_auc  = "#DDA303",
-    delta_brier   = "#B4632D")
+    delta_bs   = "#B4632D")
   
   combo_wide <- combo_wide %>%
     mutate(
       comparison_label = case_when(
-        comparison_type == "same_cohort_same_disease" ~ 
+        matched_scenario == "both" ~ 
           "Internal",
-        comparison_type == "cross_cohort_same_disease" ~ 
-          "Cohort",
-        comparison_type == "same_cohort_diff_disease" ~ 
+        matched_scenario == "condition" ~ 
           "Condition",
-        comparison_type == "cross_cohort_diff_disease" ~ 
-          "Both"),
+        matched_scenario == "cohort" ~ 
+          "Cohort",
+        matched_scenario == "neither" ~ 
+          "Neither"),
       comparison_label = factor(
         comparison_label,
         levels = c(
           "Internal",
-          "Cohort",
           "Condition",
-          "Both")),
+          "Cohort",
+          "Neither")),
       box_colour = if_else(
-        comparison_type == "same_cohort_same_disease",
+        matched_scenario == "both",
         "Internal",
         "Other"))
   
@@ -760,11 +773,11 @@ make_boxplot_delta <- function(
       ) %>%
       mutate(
         comparison_label = recode(
-          comparison_type,
-          "same_cohort_same_disease" = "Internal",
-          "cross_cohort_same_disease" = "Cohort",
-          "same_cohort_diff_disease" = "Condition",
-          "cross_cohort_diff_disease" = "Both"
+          matched_scenario,
+          "both" = "Internal",
+          "condition" = "Condition",
+          "cohort" = "Cohort",
+          "neither" = "Neither"
         ),
         label = case_when(
           p_adj < 0.001 ~ "***",
@@ -773,8 +786,8 @@ make_boxplot_delta <- function(
     
     sig_pairwise <- pairwise %>%
       dplyr::rename(
-        group1 = comparison_type_1,
-        group2 = comparison_type_2) %>%
+        group1 = matched_scenario_1,
+        group2 = matched_scenario_2) %>%
       dplyr::filter(
         metric == .env$sig_metric,
         p_adj < 0.05
@@ -782,17 +795,17 @@ make_boxplot_delta <- function(
       dplyr::mutate(
         group1 = recode(
           group1,
-          "same_cohort_same_disease" = "Internal",
-          "cross_cohort_same_disease" = "Cohort",
-          "same_cohort_diff_disease" = "Condition",
-          "cross_cohort_diff_disease" = "Both"
+          "both" = "Internal",
+          "condition" = "Condition",
+          "cohort" = "Cohort",
+          "neither" = "Neither"
         ),
         group2 = recode(
           group2,
-          "same_cohort_same_disease" = "Internal",
-          "cross_cohort_same_disease" = "Cohort",
-          "same_cohort_diff_disease" = "Condition",
-          "cross_cohort_diff_disease" = "Both"
+          "both" = "Internal",
+          "condition" = "Condition",
+          "cohort" = "Cohort",
+          "neither" = "Neither"
         )
       )
     
@@ -813,12 +826,12 @@ make_boxplot_delta <- function(
           Internal = "grey50",
           Other = metric_colours[[metric]]
         ),
-        guide = "none"
+        guide = "Neither"
       ) +
       theme_classic() +
       labs(
         title = paste0(delta_labels[[metric]]),
-        x = "Validation Change/s",
+        x = "Matched Scenario",
         y = delta_labels[[metric]]) +
       scale_y_continuous(
         breaks = seq(0, 1, by = 0.25)
@@ -876,7 +889,7 @@ make_boxplot_delta <- function(
           ),
           label = case_when(
             p_adj < 0.001 ~ "p < 0.001",
-            TRUE ~ paste0("p = ", sprintf("%.3f", p_adj))))
+            TRUE ~ paste0("p = ", sprintf("%.2f", p_adj))))
 
       p <- p +
         stat_pvalue_manual(
@@ -901,9 +914,6 @@ make_boxplot_delta <- function(
   }
 }
 
-generate_plots(analysis_res, out_dir)
-
-
 make_rel_boxplot_abs <- function(
     stat_results,
     metrics,
@@ -915,14 +925,14 @@ make_rel_boxplot_abs <- function(
   metric_labels <- c(
     roc_auc = "ROC-AUC",
     pr_auc = "PR-AUC",
-    brier = "Brier Score"
+    bs = "BS"
   )
   
   y_limits <- list(
-    roc_auc = c(0.4, 1.37),
-    pr_auc = c(0, 1.4),
-    brier = c(0, 0.9))
-  
+    roc_auc = c(0.4, 2.34),
+    pr_auc = c(0, 2.30),
+    bs = c(0, 1.45))
+
   models <- c("RF", "XGB")
   
   combo_wide <- combo_wide %>%
@@ -937,16 +947,16 @@ make_rel_boxplot_abs <- function(
           "unrelated"),
         labels = c(
           "Internal",
-          "Condition",
-          "Continuum",
-          "Biology",
-          "None")))
+          "Matched",
+          "Spectrum",
+          "Related",
+          "Unrelated")))
   
   for (model in models) {
   
     for (metric in metrics) {
       
-      metric_col <- paste0( metric, "_", model)
+      metric_col <- paste0(metric, "_", model)
       
       plot_data <- combo_wide %>%
         select(
@@ -961,11 +971,11 @@ make_rel_boxplot_abs <- function(
           "Other"
         ))
       
-      ns_data <- rel_dunn %>%
+      sig_data <- rel_dunn %>%
         filter(
           model == !!model,
           metric == !!metric,
-          P.adj >= 0.05
+          P.adj < 0.05
         ) %>%
         tidyr::separate(
           Comparison,
@@ -976,18 +986,18 @@ make_rel_boxplot_abs <- function(
           group1 = recode(
             group1,
             internal = "Internal",
-            same = "Condition",
-            continuum = "Continuum",
-            shared = "Biology",
-            unrelated = "None"
+            same = "Matched",
+            continuum = "Spectrum",
+            shared = "Related",
+            unrelated = "Unrelated"
           ),
           group2 = recode(
             group2,
             internal = "Internal",
-            same = "Condition",
-            continuum = "Continuum",
-            shared = "Biology",
-            unrelated = "None"
+            same = "Matched",
+            continuum = "Spectrum",
+            shared = "Related",
+            unrelated = "Unrelated"
           )
         )
       
@@ -1014,13 +1024,13 @@ make_rel_boxplot_abs <- function(
             Internal = "grey50",
             Other = if (model == "RF") "#A7AF5A" else "#896C74"
           ),
-          guide = "none"
+          guide = "Neither"
         ) +
         labs(
           title = paste(
             model,
             metric_labels[[metric]]),
-          x = "Shared Relationship",
+          x = "Relationship",
           y = metric_labels[[metric]]) +
         theme_classic() +
         scale_y_continuous(
@@ -1044,24 +1054,27 @@ make_rel_boxplot_abs <- function(
             r = 10,
             l = 10)) 
       
-      if (nrow(ns_data) > 0) {
+      if (nrow(sig_data) > 0) {
         
         ymax <- max(plot_data$value, na.rm = TRUE)
         
-        ns_data <- ns_data %>%
+        sig_data <- sig_data %>%
           mutate(
             y.position = ymax *
               seq(
                 1.05,
-                1.05 + 0.15 * (n() - 1),
+                1.05 + 0.2 * (n() - 1),
                 length.out = n()
               ),
-            p_label = "ns"
+            p_label = case_when(
+              P.adj < 0.001 ~ "p < 0.001",
+              TRUE ~ paste0("p = ", sprintf("%.2f", P.adj))
+            )
           )
         
         p <- p +
           ggpubr::stat_pvalue_manual(
-            ns_data,
+            sig_data,
             label = "p_label",
             tip.length = 0.01,
             size = 3,
@@ -1072,7 +1085,7 @@ make_rel_boxplot_abs <- function(
       ggsave(
         file.path(
           out_dir,
-          paste0("rel_vs_", metric, "_", model_name, ".pdf")),
+          paste0("rel_vs_", metric, "_", metric_col, ".pdf")),
         plot = p,
         width = 2.5,
         height = 3.25,
@@ -1083,144 +1096,6 @@ make_rel_boxplot_abs <- function(
   }
 }
 
-generate_plots(analysis_res, out_dir)
-
-# make_rel_boxplot_delta <- function(
-#     stat_results,
-#     metrics,
-#     out_dir) {
-#   
-#   combo_wide <- stat_results$data$combo_wide
-#   
-#   delta_labels <- c(
-#     delta_roc_auc = "Delta ROC-AUC",
-#     delta_pr_auc = "Delta PR-AUC",
-#     delta_brier = "Delta Brier Score")
-#   
-#   metric_colours <- c(
-#     delta_roc_auc = "#419F9B",
-#     delta_pr_auc  = "#DDA303",
-#     delta_brier   = "#B4632D")
-#   
-#   combo_wide <- combo_wide %>%
-#     mutate(
-#       relationship_label = factor(
-#         relationship,
-#         levels = c(
-#           "internal",
-#           "same",
-#           "continuum",
-#           "shared",
-#           "unrelated"),
-#         labels = c(
-#           "Internal",
-#           "Condition",
-#           "Continuum",
-#           "Biology",
-#           "None")),
-#       box_colour = if_else(
-#         comparison_type == "same_cohort_same_disease",
-#         "Internal",
-#         "Other"))
-#   
-#   for (metric in metrics) {
-#     
-#     # sig_metric <- sub("^delta_", "", metric)
-#     # 
-#     # sig_wilcox <- wilcox %>%
-#     #   filter(
-#     #     .data$metric == .env$sig_metric,
-#     #     .data$p_adj < 0.05
-#     #   ) %>%
-#     #   mutate(
-#     #     comparison_label = recode(
-#     #       comparison_type,
-#     #       "same_cohort_same_disease" = "Internal",
-#     #       "cross_cohort_same_disease" = "Cohort",
-#     #       "same_cohort_diff_disease" = "Condition",
-#     #       "cross_cohort_diff_disease" = "Both"
-#     #     ),
-#     #     label = case_when(
-#     #       p_adj < 0.001 ~ "***",
-#     #       p_adj < 0.01 ~ "**",
-#     #       TRUE ~ "*"))
-#     # 
-#     # sig_pairwise <- pairwise %>%
-#     #   dplyr::rename(
-#     #     group1 = comparison_type_1,
-#     #     group2 = comparison_type_2) %>%
-#     #   dplyr::filter(
-#     #     metric == .env$sig_metric,
-#     #     p_adj < 0.05
-#     #   ) %>%
-#     #   dplyr::mutate(
-#     #     group1 = recode(
-#     #       group1,
-#     #       "same_cohort_same_disease" = "Internal",
-#     #       "cross_cohort_same_disease" = "Cohort",
-#     #       "same_cohort_diff_disease" = "Condition",
-#     #       "cross_cohort_diff_disease" = "Both"
-#     #     ),
-#     #     group2 = recode(
-#     #       group2,
-#     #       "same_cohort_same_disease" = "Internal",
-#     #       "cross_cohort_same_disease" = "Cohort",
-#     #       "same_cohort_diff_disease" = "Condition",
-#     #       "cross_cohort_diff_disease" = "Both"
-#     #     )
-#     #   )
-#     
-#     delta_col <- paste0("delta_", metric)
-#     
-#     p <- ggplot(
-#       combo_wide,
-#       aes(
-#         x = relationship_label,
-#         y = .data[[delta_col]])) +
-#       # geom_boxplot(
-#       #   size = 0.8,
-#       #   alpha = 0.8,
-#       #   outlier.size = 1.5,
-#       #   colour = "#6EC4C0") +
-#       geom_boxplot(
-#         aes(colour = box_colour),
-#         size = 0.8,
-#         alpha = 0.8,
-#         outlier.size = 1.5
-#       ) +
-#       scale_colour_manual(
-#         values = c(
-#           Internal = "grey50",
-#           Other = metric_colours[[metric]]
-#         ),
-#         guide = "none"
-#       ) +
-#       geom_hline(
-#         yintercept = 0,
-#         linetype = "dashed",
-#         colour = "grey50") +
-#       labs(
-#         x = "Shared Relationship",
-#         y = paste0(
-#           "Delta ",
-#           metric_labels[[metric]],
-#           " (RF - XGB)")) +
-#       theme_classic() +
-#       theme(
-#         axis.text.x = element_text(
-#           angle = 45,
-#           hjust = 0.5))
-#     
-#     ggsave(
-#       file.path(
-#         out_dir,
-#         paste("rel_vs_", metric, ".pdf")),
-#       p,
-#       width = 4,
-#       height = 3.5,
-#       units = "in")
-#   }
-# }
 
 make_full_heatmap <- function(
     stat_results,
@@ -1263,7 +1138,7 @@ make_full_heatmap <- function(
           rev(RColorBrewer::brewer.pal(11, "Spectral"))
         )(100)
 
-      } else if (metric == "brier") {
+      } else if (metric == "bs") {
         
         fill_scale <- colorRampPalette(
           RColorBrewer::brewer.pal(11, "Spectral")
@@ -1293,6 +1168,18 @@ make_full_heatmap <- function(
       colnames(heat_matrix) <- gsub(
         "carcinoma_surgery_history",
         "CSH",
+        colnames(heat_matrix)
+      )
+      
+      rownames(heat_matrix) <- gsub(
+        "_",
+        " ",
+        rownames(heat_matrix)
+      )
+      
+      colnames(heat_matrix) <- gsub(
+        "_",
+        " ",
         colnames(heat_matrix)
       )
       
@@ -1402,6 +1289,15 @@ make_condition_heatmap <- function(
   
   for (model in models) {
     
+    valid_diseases <- combo_results %>%
+      filter(relationship != "internal") %>%
+      filter(mod == model) %>%
+      group_by(train_disease) %>%
+      summarise( n_transfers = n()/32,
+                 .groups = "drop") %>%
+      filter(n_transfers > 1) %>%
+      pull(train_disease)
+    
     for (metric in metrics) {
       
       if (metric %in% c("roc_auc", "pr_auc")) {
@@ -1410,7 +1306,7 @@ make_condition_heatmap <- function(
           rev(RColorBrewer::brewer.pal(11, "Spectral"))
         )(100)
         
-      } else if (metric == "brier") {
+      } else if (metric == "bs") {
         
         fill_scale <- colorRampPalette(
           RColorBrewer::brewer.pal(11, "Spectral")
@@ -1525,128 +1421,12 @@ make_condition_heatmap <- function(
         rot = 90,
         gp = gpar(fontsize = 11)
       )
-
-
+      
       dev.off()
     }
   }
 }
 
-make_condition_table <- function(
-    stat_results,
-    metrics,
-    out_dir) {
-  
-  combo_results <- stat_results$data$combo_results
-  
-  models <- c("RF", "XGB")
-  
-  train_condition <- list()
-  target_condition <- list()
-  
-  for (model in models) {
-    
-    train_condition[[model]] <- list()
-    target_condition[[model]] <- list()
-    
-    model_results <- combo_results %>%
-      filter(mod == model)
-    
-    for (metric in metrics) {      
-      
-      internal_metric <- model_results %>%
-        filter(relationship == "internal") %>%
-        group_by(train_disease) %>%
-        summarise(
-          internal_value = median(
-            .data[[metric]],
-            na.rm = TRUE
-          ),
-          .groups = "drop"
-        )
-      
-      # Training disease degradation
-      train_metric <- model_results %>%
-        filter(relationship != "internal") %>%
-        left_join(
-          internal_metric,
-          by = "train_disease"
-        ) %>%
-        group_by(train_disease) %>%
-        summarise(
-          validation_value = median(
-            .data[[metric]],
-            na.rm = TRUE
-          ),
-          q1_validation = quantile(
-            .data[[metric]],
-            0.25,
-            na.rm = TRUE
-          ),
-          q3_validation = quantile(
-            .data[[metric]],
-            0.75,
-            na.rm = TRUE
-          ),
-          degradation = median(
-            internal_value - .data[[metric]],
-            na.rm = TRUE
-          ),
-          q1_degradation = quantile(
-            internal_value - .data[[metric]],
-            0.25,
-            na.rm = TRUE
-          ),
-          q3_degradation = quantile(
-            internal_value - .data[[metric]],
-            0.75,
-            na.rm = TRUE
-          ),
-          n_transfers = n()/32,
-          .groups = "drop"
-        )
-      
-      # Target disease performance
-      target_metric <- model_results %>%
-        filter(relationship != "internal") %>%
-        group_by(val_disease) %>%
-        summarise(
-          validation_value = median(
-            .data[[metric]],
-            na.rm = TRUE
-          ),
-          q1_validation = quantile(
-            .data[[metric]],
-            0.25,
-            na.rm = TRUE
-          ),
-          q3_validation = quantile(
-            .data[[metric]],
-            0.75,
-            na.rm = TRUE
-          ),
-          n_transfers = n()/32,
-          .groups = "drop"
-        )
-    
-      train_condition[[model]][[metric]] <- train_metric %>%
-        filter(n_transfers >= 2)
-      
-      target_condition[[model]][[metric]] <- target_metric %>%
-        filter(n_transfers >= 2)
-    }
-  }
-
-    return(list(
-      train_condition = train_condition,
-      target_condition = target_condition
-  ))
-}
-
-plots <- make_condition_table(
-    stat_results = stat_res,
-    metrics = c("roc_auc", "pr_auc", "brier"),
-    out_dir = out_dir)
 
 # Define main function ---------------------------------------------------------
 generate_plots <- function(analysis_res, out_dir) {
@@ -1665,69 +1445,62 @@ generate_plots <- function(analysis_res, out_dir) {
   message("  > RF-XGB correlation (internal-only)")
   make_scatterplot(
     stat_results = stat_res,
-    metrics = c("roc_auc", "pr_auc", "brier"),
+    metrics = c("roc_auc", "pr_auc", "bs"),
     out_dir = out_dir,
     internal = TRUE)
   
-  message("  > RF-XGB correlation (all comparison types)")
+  message("  > RF-XGB correlation (all matched scenarios)")
   make_scatterplot(
     stat_results = stat_res,
-    metrics = c("roc_auc", "pr_auc", "brier"),
+    metrics = c("roc_auc", "pr_auc", "bs"),
     out_dir = out_dir,
     internal = FALSE)
   
   message("  > Distribution of delta metrics")
   plot_delta_distribution(
     stat_results = stat_res,
-    metrics = c("delta_roc_auc", "delta_pr_auc", "delta_brier"),
+    metrics = c("delta_roc_auc", "delta_pr_auc", "delta_bs"),
     out_dir = out_dir)
   
-  message("  > RF/XGB boxplots across comparison types")
+  message("  > RF/XGB boxplots across matched scenarios")
   make_boxplot_ind( 
     stat_results = stat_res,
-    metrics = c("roc_auc", "pr_auc", "brier"), 
+    metrics = c("roc_auc", "pr_auc", "bs"), 
     out_dir = out_dir)
   
-  message("  > ΔRF-XGB boxplots across comparison types")
+  message("  > ΔRF-XGB boxplots across matched scenarios")
   make_boxplot_delta(
     stat_results = stat_res,
-    metrics = c("delta_roc_auc", "delta_pr_auc", "delta_brier"),
+    metrics = c("delta_roc_auc", "delta_pr_auc", "delta_bs"),
     out_dir = out_dir)
   
   message("  > Trend line across biological relationship (absolute)")
   make_rel_boxplot_abs(
     stat_results = stat_res,
-    metrics = c("roc_auc", "pr_auc", "brier"),
+    metrics = c("roc_auc", "pr_auc", "bs"),
     out_dir = out_dir)
-  
-  # message("  > Trend line across biological relationship (delta)")
-  # make_rel_boxplot_delta(
-  #   stat_results = stat_res,
-  #   metrics = c("roc_auc", "pr_auc", "brier"),
-  #   out_dir = out_dir)
   
   message("  > Heatmaps of all validation results")
   make_full_heatmap(
     stat_results = stat_res,
-    metrics = c("roc_auc", "pr_auc", "brier"),
+    metrics = c("roc_auc", "pr_auc", "bs"),
     out_dir = out_dir)
   
   message("  > Heatmaps for conditions")
   make_condition_heatmap(
     stat_results = stat_res,
-    metrics = c("roc_auc", "pr_auc", "brier"),
+    metrics = c("roc_auc", "pr_auc", "bs"),
     out_dir)
   
   message("  > Barplots for conditions")
   d <- make_condition_table(
     stat_results = stat_res,
-    metrics = c("roc_auc", "pr_auc", "brier"),
+    metrics = c("roc_auc", "pr_auc", "bs"),
     out_dir)
   
   message("\nDone. Results saved to: ", out_dir)
   
   return(d)
-  
 }
 
 
