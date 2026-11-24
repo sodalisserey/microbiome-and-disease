@@ -1,4 +1,4 @@
-# Microbiome-Based Prediction Across Cohorts and Diseases
+# Microbiome-Based Prediction Across Diseases
 ### _Description:_
 This pipeline is built to train and cross-validate microbiome-based predictive models across independent stool cohorts from the `curatedMetagenomicData` R/Bioconductor repository. The primary aim is to distinguish disease-specific signatures from shared dysbiosis signals, which have direct implications for the use of microbiome-based classifiers in clinical diagnosis and precision medicine. 
 
